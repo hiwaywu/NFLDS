@@ -1,0 +1,61 @@
+/* Hide everything that is not the video. */
+
+header,
+nav,
+.navbar,
+.site-header,
+.site-nav,
+.topbar,
+.menu,
+.nav-links,
+footer,
+.site-footer,
+aside,
+#chat,
+.chat,
+.chat-box,
+.chat-panel,
+.chat-wrap,
+.live-chat,
+.chat-container,
+[id*="chat" i],
+[class*="chat" i],
+.event-mirror-banner,
+[class*="banner"],
+.notice,
+.warning,
+.alert,
+[class*="adcash"],
+[class*="adsbygoogle"] {
+  display: none !important;
+}
+
+html,
+body {
+  background: #000 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow-x: hidden !important;
+}
+
+/* the "black screen? clear your cache" bar -- pure noise */
+body > div:first-child:has(> *:not(video):not(iframe)) {
+  /* no-op safety; real hiding is done by the selectors above */
+}
+
+/* let the player use the full width once the chat column is gone */
+main,
+#main,
+.container,
+.wrapper,
+.player-wrap,
+.video-wrap {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+}
+
+iframe[title*="chat" i],
+iframe[src*="chat"] {
+  display: none !important;
+}

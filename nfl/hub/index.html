@@ -1,0 +1,1750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0c0f">
+<title>nfl hub</title>
+<link rel="icon" href="data:,">
+<script src="/hls.min.js"></script>
+<script src="/shaka.js" defer></script>
+<style>
+  :root{
+    --bg:#0b0c0f; --panel:#141519; --panel2:#191b20; --line:#23252c;
+    --txt:#e9eaee; --dim:#8b8f9a; --dim2:#5f636e;
+    --accent:#3ddc84; --accent-dim:#1f7a4c; --live:#ff4d4d;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg);color:var(--txt);
+    font:14px/1.45 -apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    display:flex;overflow:hidden;
+  }
+  #side{
+    width:352px;min-width:352px;height:100%;background:var(--panel);
+    border-right:1px solid var(--line);display:flex;flex-direction:column;
+  }
+  #brand{
+    padding:14px 16px 10px;display:flex;align-items:center;gap:9px;
+    font-weight:700;letter-spacing:.2px;font-size:15px;user-select:none;
+    -webkit-user-select:none;-webkit-touch-callout:none;
+  }
+  #brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+  #brand small{margin-left:auto;color:var(--dim2);font-weight:500;font-size:11px}
+  #datebar{display:flex;align-items:center;gap:6px;padding:0 12px 8px}
+  #datebar button{
+    background:var(--panel2);border:1px solid var(--line);color:var(--dim);
+    width:30px;height:30px;border-radius:7px;cursor:pointer;font-size:15px;line-height:1;
+  }
+  #datebar button:hover{color:var(--txt);border-color:#33363f}
+  #dateLabel{
+    flex:1;text-align:center;font-weight:600;font-size:13px;color:var(--txt);
+    background:var(--panel2);border:1px solid var(--line);border-radius:7px;
+    padding:7px 8px;cursor:pointer;user-select:none;
+  }
+  #dateLabel:hover{border-color:#33363f}
+  #dateLabel .sub{display:block;font-weight:500;font-size:10.5px;color:var(--dim2);letter-spacing:.3px}
+  #search{
+    margin:0 12px 10px;padding:8px 10px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:7px;color:var(--txt);
+    font-size:13px;outline:none;
+  }
+  #search:focus{border-color:var(--accent-dim)}
+  #note{display:none;margin:0 12px 8px;padding:7px 9px;border-radius:6px;
+        background:#1d1a12;border:1px solid #3a3220;color:#c9b382;font-size:11.5px;line-height:1.5}
+  #note.show{display:block}
+  #list{flex:1;overflow-y:auto;padding-bottom:24px;-webkit-overflow-scrolling:touch}
+  #list::-webkit-scrollbar{width:8px}
+  #list::-webkit-scrollbar-thumb{background:#2a2d35;border-radius:4px}
+  .sect{
+    display:flex;align-items:center;gap:6px;padding:12px 16px 6px;
+    font-size:10.5px;letter-spacing:.9px;text-transform:uppercase;color:var(--dim2);
+  }
+  .sect .n{margin-left:auto;color:var(--dim2);font-size:10.5px}
+  .row{
+    display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;
+    border-left:2px solid transparent;
+  }
+  .row:hover{background:var(--panel2)}
+  .row.on{background:#12181c;border-left-color:var(--accent)}
+  .row .txt{min-width:0;flex:1}
+  .row .nm{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .mt{font-size:10.5px;color:var(--dim2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .badge{
+    font-size:10px;font-weight:700;letter-spacing:.4px;padding:2px 6px;
+    border-radius:4px;background:#22252c;color:var(--dim);flex:none;
+  }
+  .badge.hd{background:#16281f;color:var(--accent)}
+  .badge.live{background:#2a1414;color:#ff4d4d}
+  .empty{padding:18px 16px;color:var(--dim2);font-size:12.5px;line-height:1.6}
+  #main{flex:1;display:flex;flex-direction:column;min-width:0;background:#000}
+  #stage{flex:1;position:relative;background:#000;display:flex;align-items:center;justify-content:center;min-height:0}
+  video{width:100%;height:100%;object-fit:contain;object-position:center;background:#000;display:none}
+  /* Fullscreen must letterbox, never distort: a 16:9 feed on a 16:10 monitor has
+     to get black bars. The UA stylesheet for fullscreen video does not set
+     object-fit, and Chrome's *native* video fullscreen path ignores it entirely,
+     which is why the standard Fullscreen API is preferred on desktop. */
+  video:fullscreen,video:-webkit-full-screen{
+    object-fit:contain !important;object-position:center !important;background:#000;
+  }
+  #stage:fullscreen,#stage:-webkit-full-screen{
+    background:#000;
+    /* the mobile layout gives the stage an aspect-ratio and a 46vh cap; in
+       fullscreen the element must be the screen, and the video letterboxes
+       inside it -- otherwise the picture lands off-centre */
+    width:100vw !important;height:100vh !important;
+    max-height:none !important;aspect-ratio:auto !important;
+    display:flex;align-items:center;justify-content:center;
+  }
+  :fullscreen::backdrop,:-webkit-full-screen::backdrop{background:#000}
+  /* inside a fullscreened stage the picture is the only thing on screen */
+  #stage:fullscreen video,#stage:-webkit-full-screen video{
+    object-fit:contain !important;object-position:center !important;background:#000;
+  }
+  #stage:fullscreen #reloadStream,#stage:-webkit-full-screen #reloadStream{display:none !important}
+  #fsexit{display:none}
+  /* In fullscreen the picture is the only thing on screen. On a phone there is no
+     pointer that "moves away", so a button drawn in the corner stays there forever --
+     and the platform's own control bar keeps its progress row on screen too. Both
+     fade out after a couple of quiet seconds and come back on a tap. */
+  #fsexit,#bar,#stage #unmute{transition:opacity .25s ease}
+  body.fsfade #fsexit,body.fsfade #bar,body.fsfade #stage #unmute{
+    opacity:0 !important;pointer-events:none !important;
+  }
+  body.fsfade{cursor:none}
+  #stage:fullscreen #fsexit,#stage:-webkit-full-screen #fsexit{
+    display:block;position:absolute;top:12px;right:14px;z-index:40;
+    background:rgba(18,20,24,.72);border:1px solid #2c3038;color:#c9cdd6;border-radius:8px;
+    padding:8px 12px;font:12px -apple-system,"Segoe UI",sans-serif;cursor:pointer;
+  }
+  #stage:fullscreen #fsexit:hover{color:#fff;border-color:var(--accent)}
+  /* keep the sound chip: audio starts muted by policy, so it must stay reachable */
+  #stage:fullscreen #unmute,#stage:-webkit-full-screen #unmute{top:12px;left:14px;transform:none;bottom:auto}
+  body.iframeMode #pf{display:block !important}
+  body.iframeMode video{display:none}
+  body.iframeMode #idle{display:none}
+  body.playing video{display:block}
+  #idle{
+    position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:14px;text-align:center;color:var(--dim2);padding:24px;
+  }
+  #idle h1{margin:0;font-size:19px;color:#3c4049;font-weight:600;letter-spacing:.2px}
+  #idle p{margin:0;font-size:12.5px;max-width:420px;line-height:1.7}
+  #spinner{
+    position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    flex-direction:column;gap:12px;background:rgba(0,0,0,.72);z-index:5;font-size:12.5px;color:var(--dim)
+  }
+  #spinner.show{display:flex}
+  .ring{
+    width:34px;height:34px;border-radius:50%;border:3px solid #23262d;
+    border-top-color:var(--accent);animation:spin .8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #bar{
+    height:34px;display:flex;align-items:center;gap:12px;padding:0 14px;
+    background:var(--panel);border-top:1px solid var(--line);font-size:11.5px;color:var(--dim2);
+    flex:none;
+  }
+  #bar .title{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44%}
+  #bar .pill{background:#1b1e24;border-radius:5px;padding:2px 7px;color:var(--dim);white-space:nowrap}
+  #bar .pill.good{color:var(--accent)}
+  #bar .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+  #bar button{
+    background:#1b1e24;border:1px solid var(--line);color:var(--dim);
+    border-radius:6px;padding:4px 9px;font-size:11.5px;cursor:pointer;
+  }
+  #bar button:hover{color:var(--txt)}
+  #toast{
+    position:fixed;bottom:52px;left:50%;transform:translateX(-50%) translateY(12px);
+    background:#1c2a22;border:1px solid #2c4a39;color:#bfe9d2;padding:9px 15px;
+    border-radius:8px;font-size:12.5px;opacity:0;pointer-events:none;transition:.22s;z-index:20;
+    max-width:86vw;text-align:center;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #unmute{display:none;position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+     background:#16281f;border:1px solid #2c4a39;color:#3ddc84;padding:10px 18px;border-radius:9px;
+     font:14px -apple-system,Segoe UI,sans-serif;cursor:pointer;z-index:30}
+  #diag{
+    position:fixed;inset:0;z-index:60;background:rgba(4,6,8,.94);display:none;
+    padding:18px;overflow:auto;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;color:#c9cdd6;
+  }
+  #diag.show{display:block}
+  #diag h2{font:600 14px -apple-system,Segoe UI,sans-serif;color:var(--accent);margin:0 0 12px}
+  #diag table{border-collapse:collapse;width:100%;max-width:820px}
+  #diag td{padding:4px 8px;border-bottom:1px solid #1b1f26;vertical-align:top;word-break:break-all}
+  #diag td:first-child{color:#7d8794;width:34%;white-space:nowrap}
+  #diag .close{position:sticky;top:0;margin:0 0 12px;background:#16281f;border:1px solid #2c4a39;
+    color:var(--accent);border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer}
+
+  /* ---------------- phone / narrow window ---------------- */
+  @media (max-width: 900px){
+    body{flex-direction:column}
+    #main{order:1;flex:0 0 auto;width:100%}
+    #stage{flex:none;width:100%;aspect-ratio:16/9;height:auto;max-height:46vh}
+    #stage #idle p{display:none}
+    #idle h1{font-size:14px}
+    #idle{padding:10px}
+    #side{
+      order:2;width:100%;min-width:0;flex:1 1 auto;height:auto;min-height:0;
+      border-right:0;border-top:1px solid var(--line);
+    }
+    #brand{padding:10px 14px 6px;font-size:14px}
+    #datebar{padding:0 10px 6px}
+    #datebar button{width:38px;height:38px;font-size:17px}
+    #dateLabel{padding:9px 6px}
+    #search{margin:0 10px 8px;padding:11px 12px;font-size:15px}
+    #list{padding-bottom:32px}
+    .row{padding:13px 14px}
+    .row .nm{font-size:14.5px}
+    .row .mt{font-size:11.5px}
+    .badge{font-size:10.5px;padding:3px 7px}
+    .sect{padding:12px 14px 4px}
+    #bar{height:auto;min-height:44px;flex-wrap:wrap;padding:6px 10px;row-gap:5px;font-size:11px;overflow:visible}
+    #bar .title{max-width:100%;flex:1 1 100%;font-size:12px}
+    #bar button{padding:7px 10px;font-size:11.5px}
+    #bar .right{margin-left:0;gap:6px;flex-wrap:wrap}
+    #unmute{top:10px;bottom:auto;transform:translateX(-50%);left:50%;padding:8px 14px;font-size:13px}
+    #toast{bottom:auto;top:calc(46vh + 8px);font-size:12.5px}
+  }
+
+  /* ---------------- Galaxy Z Fold inner screen ----------------
+     Inner display 2184x1968 at ~2.34 dppx: 842 x 934 css px upright, 934 x 842
+     turned. Upright it gets the phone layout, but with room for a full-width
+     picture. Turned, it is wider than 900 and gets the two-pane layout -- whose
+     one-line control bar did not fit in the 582 px beside the list: the page grew
+     to 1204 px, the WebView zoomed out and live / fullscreen fell off the edge.
+     The bar now wraps at every width, and touch screens get finger-sized rows. */
+  #bar{flex-wrap:wrap;height:auto;min-height:34px;row-gap:4px;padding-top:4px;padding-bottom:4px}
+  #bar .right{flex-wrap:wrap}
+  @media (min-width: 701px) and (max-width: 900px){
+    #stage{max-height:min(56vh, calc(100vw * 9 / 16))}
+    #toast{top:calc(min(56vh, 100vw * 9 / 16) + 8px)}
+  }
+  @media (pointer: coarse) and (min-width: 901px){
+    #side{width:320px;min-width:320px}
+    #bar{min-height:44px;padding:6px 10px;row-gap:6px}
+    #bar .title{max-width:100%;flex:1 1 100%;font-size:12.5px}
+    #bar .right{margin-left:0;gap:6px}
+    #bar button{padding:8px 12px;font-size:12.5px}
+    #datebar button{width:38px;height:38px;font-size:17px}
+    #search{padding:10px 12px;font-size:14px}
+    .row{padding:12px 14px}
+    .row .nm{font-size:14px}
+  }
+#list{-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain}
+body{transition:none!important}
+</style>
+</head>
+<body>
+
+<div id="side">
+  <div id="brand"><span class="dot"></span>nfl hub<small id="count"></small></div>
+
+  <div id="datebar">
+    <button id="prev" title="previous day">&#8249;</button>
+    <div id="dateLabel">Today<span class="sub">-</span></div>
+    <button id="next" title="next day">&#8250;</button>
+  </div>
+
+  <input id="search" placeholder="filter games / channels..." autocomplete="off">
+  <div id="note"></div>
+  <div id="list"></div>
+</div>
+
+<div id="main">
+  <div id="stage">
+    <video id="v" playsinline webkit-playsinline controls></video>
+    <div id="idle">
+      <h1>pick something below</h1>
+      <p><b>NFL TV</b> plays right here at full quality, buffered locally.<br>
+         A <b>game</b> plays right here too, in its own player page.</p>
+    </div>
+    <iframe id="pf" sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-orientation-lock allow-modals allow-downloads" allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *" allowfullscreen referrerpolicy="no-referrer-when-downgrade" style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;background:#000"></iframe>
+    <button id="reloadStream" style="display:none;position:absolute;top:10px;right:12px;z-index:6;background:rgba(20,22,26,.86);border:1px solid #2c3038;color:#c9cdd6;border-radius:7px;padding:6px 11px;font:12px -apple-system,Segoe UI,sans-serif;cursor:pointer;opacity:.5">&#8635; reload stream</button>
+    <div id="spinner"><div class="ring"></div><span id="spintext">working...</span></div>
+    <div id="unmute">tap for sound</div>
+    <button id="fsexit" title="leave fullscreen (Esc)">&#10005; exit full</button>
+  </div>
+  <div id="bar">
+    <span class="title" id="nowTitle">nothing playing</span>
+    <span class="pill" id="pillQ" style="display:none">-</span>
+    <span class="pill" id="pillBuf" style="display:none">-</span>
+    <span class="pill" id="pillLat" style="display:none" title="seconds behind the live edge">-</span>
+    <span class="pill" id="pillSrc" style="display:none" title="where this picture comes from">-</span>
+    <div class="right">
+      <button id="live" title="jump back to the live edge">live</button>
+      <button id="snd" title="sound on / off">muted</button>
+      <button id="low" title="smaller buffer, closer to live">low delay</button>
+      <button id="freezeBtn" title="the picture just froze">frozen?</button>
+      <button id="fs">fullscreen</button>
+      <button id="reload">reload list</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="diag"><button class="close" id="diagClose">close</button><div id="diagBody"></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const v = $('#v');
+const stage = document.getElementById('stage');
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const IN_APP = /NFLHubApp/.test(navigator.userAgent);
+// Game feeds are Widevine. EME needs a secure origin AND a webview build that
+// exposes MediaKeys at all; Android WebView frequently ships without it, which
+// is the black-rectangle case. Know the answer before we navigate.
+const CAN_DRM = (typeof navigator.requestMediaKeySystemAccess === 'function') && window.isSecureContext;
+let _drmAnswer = null;
+// Ask the CDM directly instead of trusting "is EME a function". A browser with
+// EME but no Widevine key system cannot show these feeds, and saying so up front
+// is better than a black rectangle with no explanation.
+async function drmState(timeout){
+  if (_drmAnswer !== null) return _drmAnswer;
+  if (!navigator.requestMediaKeySystemAccess) { _drmAnswer = false; return false; }
+  const probe = (async () => {
+    try {
+      await navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{
+        initDataTypes: ['cenc'],
+        videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"' }]
+      }]);
+      return true;
+    } catch(e){ return false; }
+  })();
+  try {
+    const r = await Promise.race([probe, new Promise(res => setTimeout(() => res(null), timeout || 2500))]);
+    if (r !== null) _drmAnswer = r;
+    return r;
+  } catch(e){ _drmAnswer = false; return false; }
+}
+const APP = { diag: null };
+// The standalone phone app opens a game's own player page inside the app (its
+// WebView grants Widevine). It cannot frame the player in this page: the player
+// hosts answer "not available here" to any site that is not theirs.
+const STANDALONE = IN_APP && !!(window.Hub && Hub.standalone && Hub.standalone());
+let channels = [], games = [], dates = [], curDate = '', hls = null, relayBase = '', relayPort = 0;
+let season = null;   // {start, end}: the schedule is known this far, so an empty day is real
+let lowMode = false, lastChannel = null, srcDown = [], lastChecked = '';
+const DATE_KEY = 'nflhub.date';
+
+const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const monNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const pad = n => String(n).padStart(2,'0');
+const toISO = d => d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+const todayISO = () => toISO(new Date());
+
+function labelFor(dateISO){
+  const t = todayISO();
+  const d = new Date(dateISO + 'T12:00:00');
+  const head = dateISO === t ? 'Today' : dateISO === tmrISO() ? 'Tomorrow' : dayNames[d.getDay()];
+  const yr = d.getFullYear() !== new Date().getFullYear() ? ' ' + d.getFullYear() : '';
+  return { head, sub: monNames[d.getMonth()] + ' ' + d.getDate() + yr };
+}
+function tmrISO(){ const d = new Date(); d.setDate(d.getDate()+1); return toISO(d); }
+
+function toast(msg, ms){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), ms || 2600);
+}
+function setSpin(on, text){
+  $('#spintext').textContent = text || 'working...';
+  $('#spinner').classList.toggle('show', !!on);
+}
+function renderDateLabel(){
+  const L = labelFor(curDate);
+  $('#dateLabel').innerHTML = L.head + '<span class="sub">' + L.sub + '</span>';
+}
+
+function row(el, opt){
+  el.className = 'row';
+  const txt = document.createElement('div'); txt.className = 'txt';
+  const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = opt.name;
+  const mt = document.createElement('div'); mt.className = 'mt'; mt.textContent = opt.meta || '';
+  txt.appendChild(nm); txt.appendChild(mt); el.appendChild(txt);
+  if (opt.badge){
+    const b = document.createElement('span');
+    b.className = 'badge ' + (opt.badgeClass || '');
+    b.textContent = opt.badge;
+    el.appendChild(b);
+  }
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.row.on').forEach(r => r.classList.remove('on'));
+    el.classList.add('on');
+    opt.onClick();
+  });
+  return el;
+}
+
+function render(){
+  const q = $('#search').value.trim().toLowerCase();
+  const list = $('#list'); list.innerHTML = '';
+
+  const gs = games.filter(g => !q || g.name.toLowerCase().includes(q));
+  const sh = document.createElement('div'); sh.className = 'sect';
+  sh.innerHTML = 'games <span class="n">' + gs.length + '</span>';
+  list.appendChild(sh);
+
+  if (srcDown.length){
+    const w = document.createElement('div'); w.className = 'note show';
+    w.style.cssText = 'margin:0 12px 8px;padding:6px 9px;border-radius:6px;background:#1d1a12;border:1px solid #3a3220;color:#c9b382;font-size:11px';
+    w.textContent = 'source down: ' + srcDown.join(', ') + ' — list may be incomplete';
+    list.appendChild(w);
+  }
+
+  if (!gs.length){
+    const e = document.createElement('div'); e.className = 'empty';
+    const nd = dates.filter(d => d > curDate)[0];
+    const span = season ? 'the schedule is known through ' + season.end + ', so this night really is empty' : '';
+    e.innerHTML = q ? 'nothing matches that filter.'
+      : 'no NFL games on this date.' + (span ? '<br><span style="color:#6b7280">' + span + '</span>' : '') +
+        '<div id="nxt" style="margin-top:10px;color:#6b7280">looking for the next slate...</div>' +
+        (nd ? '<div style="margin-top:8px"><a href="#" id="jump" style="color:#3ddc84">jump to ' + nd + '</a></div>' : '');
+    list.appendChild(e);
+    const j = e.querySelector('#jump');
+    if (j) j.addEventListener('click', ev => { ev.preventDefault(); curDate = nd; loadGames(); });
+    // an empty night is usually a holiday (Thanksgiving), so offer the next one
+    if (!q) fetch('/api/next?date=' + encodeURIComponent(curDate) + '&_=' + Date.now())
+      .then(r => r.json())
+      .then(nx => {
+        const el = e.querySelector('#nxt');
+        if (!el) return;
+        if (nx && nx.date){
+          el.innerHTML = '<a href="#" id="jump2" style="color:#3ddc84">next games: ' + nx.date + ' (' + nx.games + ')</a>';
+          const a = e.querySelector('#jump2');
+          if (a) a.addEventListener('click', ev => { ev.preventDefault(); curDate = nx.date; loadGames(); });
+        } else { el.textContent = ''; }
+      })
+      .catch(() => { const el = e.querySelector('#nxt'); if (el) el.textContent = ''; });
+  } else if (gs.every(g => g.stream === false) && !q){
+    // the fixture list comes from the league schedule (2 weeks out), the stream
+    // sites only post a few days ahead -- say so instead of looking broken
+    const w = document.createElement('div'); w.className = 'note show';
+    w.style.cssText = 'margin:0 12px 8px;padding:6px 9px;border-radius:6px;background:#141a20;border:1px solid #22303c;color:#8fa5b8;font-size:11px';
+    w.textContent = 'fixtures only - the stream sources list a couple of days ahead, so check back closer to kickoff';
+    list.appendChild(w);
+  }
+  gs.forEach(g => {
+    const live = g.state === 'in';
+    const done = g.state === 'post';
+    const handoff = IS_MOBILE && !STANDALONE;   // a phone browser tab: games go to the site
+    let meta, badge, cls;
+    if (done) { meta = (g.time ? g.time + ' - ' : '') + 'final'; badge = 'final'; cls = ''; }
+    else if (live) { meta = 'live now' + (handoff ? ' \u00b7 opens in browser' : ''); badge = 'live'; cls = 'live'; }
+    else if (g.stream === false) { meta = (g.time ? g.time + ' - ' : '') + 'no stream listed yet'; badge = 'none'; cls = ''; }
+    else { meta = (g.time ? g.time + ' - ' : '') + 'stream posts near kickoff'; badge = 'watch'; cls = ''; }
+    list.appendChild(row(document.createElement('div'), {
+      name: g.name, meta: meta, badge: badge, badgeClass: cls,
+      onClick: () => {
+        if (done) { toast('That game is over.', 2800); return; }
+        if (g.stream === false) { toast('No stream listed for this game yet.', 3000); return; }
+        watchGame(g);
+      }
+    }));
+  });
+
+  const cs = channels.filter(c => !q || c.name.toLowerCase().includes(q));
+  const sc = document.createElement('div'); sc.className = 'sect';
+  sc.innerHTML = 'nfl tv <span class="n">' + cs.length + '</span>';
+  list.appendChild(sc);
+  cs.forEach(c => list.appendChild(row(document.createElement('div'), {
+    name: c.name, meta: 'live channel', badge: '1080p', badgeClass: 'hd',
+    onClick: () => playChannel(c)
+  })));
+}
+
+async function loadGames(){
+  renderDateLabel();
+  try { localStorage.setItem(DATE_KEY, curDate); } catch(e){}
+  try {
+    const j = await fetch('/api/games?date=' + encodeURIComponent(curDate) + '&_=' + Date.now()).then(r => r.json());
+    games = j.games || [];
+    const src = j.sources || {};
+    srcDown = Object.keys(src).filter(k => src[k] && src[k].ok === false);
+    lastChecked = j.checked_at || '';
+    $('#count').textContent = (games.length ? games.length + ' games' : '') + (lastChecked ? ' · ' + lastChecked : '');
+  } catch(e){ games = []; }
+  render();
+}
+
+async function playChannel(c, byMirror, keys, fromGame, useShaka){
+  // what is on screen now: a mirror that refuses to start must not take the
+  // title (or the failover position) from the stream that is still playing
+  const prev = { ch: lastChannel, idx: mirrorIdx, title: $('#nowTitle').textContent };
+  gameNow = fromGame ? (pol.game || gameNow) : null;
+  lastChannel = c;
+  const idx = channels.findIndex(x => x.url === c.url);
+  if (!byMirror) { mirrorTried.clear(); mirrorReason = ''; }
+  if (idx >= 0) mirrorIdx = idx;
+  setSpin(true, lowMode ? 'low-delay mode: smaller buffer...' : 'picking the best feed and buffering locally...');
+  $('#nowTitle').textContent = c.name + mirrorTag();
+  $('#pillQ').style.display = 'none';
+  $('#pillBuf').style.display = 'none';
+  try {
+    // r=<player page>: a harvested game feed carries the Referer its own
+    // server expects; feeds.txt channels keep the list's third column
+    const q = '/api/play?u=' + encodeURIComponent(c.url) +
+              (c.referer ? '&r=' + encodeURIComponent(c.referer) : '') +
+              (lowMode ? '&low=1' : '');
+    const j = await fetch(q).then(r => r.json());
+    if (!j.ok) throw new Error(j.error || 'relay failed');
+    const st = j.stats || {}, variant = st.variant || {};
+    relayPort = j.port || 0;
+    if (variant.w){
+      $('#pillQ').textContent = variant.w + 'x' + variant.h + ' @ ' + (variant.fps || '?') + 'fps';
+      $('#pillQ').className = 'pill good';
+      $('#pillQ').style.display = '';
+    }
+    const srcPill = $('#pillSrc');
+    if (srcPill){ srcPill.textContent = 'relay - ' + (c.name || 'channel'); srcPill.className = 'pill good'; srcPill.style.display = ''; }
+    // shaka reads the relay's playlist on our own origin: no CORS, keeps the
+    // DVR ring, and its clearKeys config is the provider's own decrypt recipe.
+    // A feed that keeps its sound in a separate rendition plays silent unless
+    // the player is given the master that names both, so prefer that one.
+    const shakaUrl = (j.audio && j.master) ? j.master : j.url;
+    if (useShaka && typeof shaka !== 'undefined') attachShaka(shakaUrl, keys);
+    else attach(j.url, keys);
+    toast('relay up - buffering the live edge');
+    pollStats();
+  } catch(e){
+    toast('could not start that channel: ' + e.message, 4200);
+    setSpin(false);
+    if (hls && prev.ch){
+      if (byMirror) mirrorTried.add(c.url);
+      lastChannel = prev.ch; mirrorIdx = prev.idx; $('#nowTitle').textContent = prev.title;
+    }
+    // a dead mirror is also a reason to move on, not just to sit there
+    if (!byMirror) return mirrorFail('could not start: ' + e.message);
+  }
+}
+
+// ---------------------------------------------------------- mirror failover
+// Channels are mirrors of the same thing (main / Akamai / Amagi / backup). We
+// own the player here, so a broken mirror is observable instead of guessed:
+//   - no progress: currentTime frozen for 4 s while not paused / seeking
+//   - waiting/stalled events piling up (3 in 60 s)
+//   - an hls fatal error that the retry pass did not fix
+//   - the relay refusing to start at all
+// On any of those, hop to the next mirror that has not been tried yet, once per
+// 15 s, and only while the channel list has an untried entry. A manual click
+// resets the whole thing, so it never fights the user.
+let mirrorIdx = -1, mirrorTried = new Set(), mirrorLastSwitch = 0;
+let seekGraceUntil = 0, attachAt = 0;
+let mirrorReason = '', mirrorStalls = [];
+let mirrorLastT = -1, mirrorLastMove = Date.now();
+
+function mirrorTag(){
+  const n = mirrorTried.size;
+  return n ? '  (mirror ' + (mirrorIdx + 1) + '/' + channels.length + ')' : '';
+}
+
+function mirrorFail(reason){
+  // a dead game feed does not get laundered into the NFL TV channel list:
+  // its failover hops the game's own player links; that's the whole point
+  if (gameNow){
+    const pool = (pol.cands || []).filter(c => c.ok && c.frame);
+    if (!pool.length) { toast('game feed failed (' + reason + ')', 4000); return false; }
+    const now2 = Date.now();
+    if (now2 - mirrorLastSwitch < 15000) return false;
+    mirrorLastSwitch = now2;
+    for (const c of pool){
+      if (mirrorTried.has(c.frame)) continue;
+      mirrorTried.add(c.frame);
+      mirrorReason = reason;
+      toast('game link failed - trying the next main link', 3200);
+      watchGame(gameNow, c.frame);
+      return true;
+    }
+    toast('every game link failed (' + reason + ') - use the site chip if one more try will not help', 5000);
+    return false;
+  }
+  if (!channels.length) return false;
+  const now = Date.now();
+  if (now - mirrorLastSwitch < 15000) return false;        // no ping-pong
+  mirrorLastSwitch = now;
+  if (lastChannel) mirrorTried.add(lastChannel.url);
+  mirrorReason = reason;
+  for (let step = 1; step <= channels.length; step++){
+    const i = (mirrorIdx + step) % channels.length;
+    if (mirrorTried.has(channels[i].url)) continue;
+    toast(reason + ' - trying ' + channels[i].name, 3200);
+    playChannel(channels[i], true);
+    return true;
+  }
+  toast('every mirror failed (' + reason + ') - pick one manually', 5000);
+  return false;
+}
+
+setInterval(() => {
+  if (!hls || !v || v.paused || !lastChannel) return;
+  // a seek is not a stall: buffering the target position takes seconds, and
+  // treating that as failure used to rotate mirrors (and wipe the DVR) mid-seek
+  if (v.seeking || Date.now() < seekGraceUntil) return;
+  const now = Date.now();
+  const t = v.currentTime;
+  if (t !== mirrorLastT) { mirrorLastT = t; mirrorLastMove = now; return; }
+  const frozen = now - mirrorLastMove;
+  const limit = dvrHold ? 15000 : 4000;     // deliberately behind: allow a slow seek to land
+  if (frozen > limit && v.readyState < 3){
+    mirrorFail('picture stalled');
+  }
+}, 1000);
+
+function noteStall(){
+  // startup and the jump to the live edge raise 'waiting' by design -- only
+  // buffering once the picture is running says anything about the mirror
+  if (Date.now() - attachAt < 12000 || v.seeking || Date.now() < seekGraceUntil) return;
+  mirrorStalls.push(Date.now());
+  mirrorStalls = mirrorStalls.filter(t => Date.now() - t < 60000);
+  if (mirrorStalls.length >= 3) { mirrorStalls = []; mirrorFail('repeated buffering'); }
+}
+
+// ---------------------------------------------------------------- sound
+// The WebView is configured with mediaPlaybackRequiresUserGesture(false), so
+// there is no autoplay policy to fight: the only reason the picture was silent
+// is that our own play path muted the element and never unmuted it. Sound is
+// therefore a plain state we own, and every entry point (chip, stage tap, the
+// bar button, a game starting) goes through the same two functions.
+function soundState(){
+  const on = !v.muted && v.volume > 0;
+  const b = $('#snd');
+  if (b){
+    b.textContent = on ? 'sound on' : 'muted';
+    b.style.color = on ? 'var(--accent)' : '';
+  }
+  return on;
+}
+function soundOn(){
+  try { v.muted = false; v.volume = 1; } catch(e){}
+  const p = v.play();
+  if (p && p.catch) p.catch(function(){});
+  hideUnmute();
+  soundState();
+}
+function soundOff(){
+  try { v.muted = true; } catch(e){}
+  soundState();
+}
+function showUnmute(){ const u = $('#unmute'); if (u) u.style.display = 'block'; }
+function hideUnmute(){ const u = $('#unmute'); if (u) u.style.display = 'none'; }
+
+function tryPlay(){
+  // Android WebView eats the user gesture while we await the resolve call, so
+  // an unmuted play() was rejected there. This build disables that policy in
+  // MainActivity, so try sound first and only fall back to muted+chip.
+  const p = v.play();
+  if (!p || !p.catch){ v.muted = false; soundState(); return; }
+  p.then(function(){ soundOn(); })
+   .catch(function(){
+     v.muted = true;
+     const q = v.play();
+     if (q && q.catch) q.catch(function(){});
+     showUnmute();
+     soundState();
+   });
+}
+
+// ---------- latency tuning ----------
+// The relay already buffers ~60 s and serves it from localhost, so the player's
+// job is: start at the live edge, stay there, and ride out a slow segment by
+// nudging the playback rate instead of stalling.
+//   delayTarget = how many segment durations behind the edge we aim to sit
+// 6 s segments, so 2 => ~12 s behind live, 1.25 => ~7.5 s (crisper, less slack)
+const DELAY = { normal: 2, low: 1.25 };
+let stallCount = 0;
+v.addEventListener('waiting', () => { stallCount++; noteStall(); });
+
+function hlsConfig(){
+  const target = lowMode ? DELAY.low : DELAY.normal;
+  return {
+    lowLatencyMode: false,
+    enableWorker: true,                 // demux off the main thread = no UI jank
+    backBufferLength: 30,               // keep 30 s of history for instant seek-back
+    maxBufferLength: lowMode ? 15 : 30, // how far ahead hls.js fills
+    maxMaxBufferLength: 60,
+    liveSyncDurationCount: target,      // where playback starts relative to the edge
+    liveMaxLatencyDurationCount: target + 1.5,   // correct long before it drifts far
+    maxLiveSyncPlaybackRate: 1.35,      // speed up to catch up instead of jumping
+    manifestLoadingTimeOut: 20000,
+    manifestLoadingMaxRetry: 10,        // the relay answers 503 until its first segment
+    manifestLoadingRetryDelay: 700,
+    levelLoadingMaxRetry: 6,
+    fragLoadingMaxRetry: 8,
+    fragLoadingRetryDelay: 500,
+    abrEwmaDefaultEstimate: 25000000,   // localhost: assume plenty of bandwidth
+    startLevel: -1
+  };
+}
+
+let shakaPlayer = null;
+let shakaReady = typeof shaka !== 'undefined';
+// which thing is on screen: a game (failover hops player links) or a channel
+// (failover hops the channel mirrors) -- the laundering that sent every dead
+// game feed to NFL TV happened exactly here
+let gameNow = null;
+
+function attachShaka(url, keys){
+  const _pf = $('#pf'); if (_pf) { _pf.style.display = 'none'; _pf.removeAttribute('src'); }
+  if (pol.timer) { clearInterval(pol.timer); pol.timer = null; pol.game = null; }
+  document.body.classList.remove('iframeMode');
+  $('#reloadStream').style.display = 'none';
+  $('#idle').style.display = 'none';
+  document.body.classList.add('playing');
+  relayBase = url.replace(/\/live\.m3u8.*$/, '');
+  attachAt = Date.now();
+  // drop the hls.js instance: the relay is one stream, the player one at a time
+  if (hls){ hls.destroy(); hls = null; }
+  if (shakaPlayer){ try { shakaPlayer.destroy(); } catch(e){} shakaPlayer = null; }
+  v.removeAttribute('src');
+  setSpin(true, 'starting the game feed (shaka + clearkey)...');
+  const boot = () => {
+    if (typeof shaka === 'undefined'){ toast('shaka player did not load - falling back to hls', 3000); setTimeout(() => attach(url, keys), 100); return; }
+    shaka.polyfill.installAll();
+    if (!shaka.Player.isBrowserSupported()){
+      toast('shaka: browser unsupported - falling back', 2600);
+      setTimeout(() => attach(url, keys), 200);
+      return;
+    }
+    shakaPlayer = new shaka.Player(v);
+    const cfg = {};
+    if (keys && typeof keys === 'object' && Object.keys(keys).length){
+      // exactly what the provider's own page does for these feeds: local
+      // clearkey, no license server involved
+      cfg.drm = { clearKeys: keys };
+    }
+    cfg.streaming = { lowLatencyMode: false, bufferingGoal: 40, rebufferingGoal: 2 };
+    cfg.manifest = { retryParameters: { timeout: 20000, maxAttempts: 10, backoffFactor: 1.4 } };
+    shakaPlayer.configure(cfg);
+    shakaPlayer.load(url).then(() => {
+      $('#idle').style.display = 'none';
+      document.body.classList.add('playing');
+      setSpin(false);
+      // the game feed must come up with sound, not muted: the old path muted
+      // the element and hid the only button that could undo it
+      v.muted = false;
+      try { v.volume = 1; } catch(e){}
+      const p = v.play();
+      if (p && p.catch) p.catch(function(){ showUnmute(); });
+      soundState();
+    }).catch(err => {
+      const why = (err && (err.message || err.code)) || 'unknown';
+      console.log('shaka load failed: ' + why);
+      toast('game feed error: ' + why, 4200);
+      setSpin(false);
+      // a dead game feed must never launder into the channels list AND must
+      // never dump the user into the ad-filled site: hop the game's other
+      // links, then say so and stay put
+      if (pol.cands && pol.cands.length){
+        const next = pol.cands.find(c => c.ok && c.frame && (!pol.candsTried || !pol.candsTried.has(c.frame)));
+        if (next){
+          toast('that game link is dead - trying the next main link', 3200);
+          watchGame(pol.game || lastGame, next.frame);
+          return;
+        }
+      }
+      polReset(pol.game || lastGame, 0);
+      const g2 = lastGame || pol.game;
+      if (g2) showResolveFailed(g2);
+    });
+  };
+  // shaka-player is deferred; wait for it before the first use
+  const wait = () => {
+    if (typeof shaka !== 'undefined') boot(); else setTimeout(wait, 200);
+  };
+  wait();
+}
+function attach(url, keys){
+  const _pf = $('#pf'); if (_pf) { _pf.style.display = 'none'; _pf.removeAttribute('src'); }
+  if (pol.timer) { clearInterval(pol.timer); pol.timer = null; pol.game = null; }
+  document.body.classList.remove('iframeMode');
+  $('#reloadStream').style.display = 'none';
+  $('#idle').style.display = 'none';
+  document.body.classList.add('playing');
+  relayBase = url.replace(/\/live\.m3u8.*$/, '');
+  attachAt = Date.now();
+  if (hls){ hls.destroy(); hls = null; }
+  if (shakaPlayer){ try { shakaPlayer.destroy(); } catch(e){} shakaPlayer = null; }
+  v.removeAttribute('src');
+  setSpin(true, 'starting the stream...');
+  if (window.Hls && Hls.isSupported()){
+    const cfg = hlsConfig();
+    if (keys && typeof keys === 'object' && Object.keys(keys).length){
+      // hls.js path kept for non-game feeds that happen to carry keys
+      cfg.emeEnabled = true;
+      cfg.drmSystems = { 'org.w3.clearkey': { licenseUrl: '/api/clearkey' } };
+    }
+    hls = new Hls(cfg);
+    hls.loadSource(url);
+    hls.attachMedia(v);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      const lv = hls.levels[hls.levels.length - 1];
+      if (lv && lv.width){
+        $('#pillQ').textContent = lv.width + 'x' + lv.height + ' @ ' + (Math.round(lv.frameRate) || '?') + 'fps';
+        $('#pillQ').className = 'pill good';
+        $('#pillQ').style.display = '';
+      }
+      try {
+        const edge = hls.liveSyncPosition;
+        if (typeof edge === 'number' && isFinite(edge) && Math.abs(v.currentTime - edge) > 1.5){
+          v.currentTime = edge;
+        }
+      } catch(e){}
+      tryPlay();
+      setSpin(false);
+    });
+    hls.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal) return;
+      setSpin(false);
+      toast('playback error: ' + d.details, 4000);
+      if (!attach._retried){ attach._retried = true; setTimeout(() => attach(url, keys), 1500); return; }
+      mirrorFail('feed error: ' + d.details);
+    });
+    attach._retried = false;
+  } else if (v.canPlayType('application/vnd.apple.mpegurl')){
+    v.src = url; tryPlay();
+  } else {
+    toast('this device cannot play HLS in a page', 4000);
+  }
+}
+
+async function pollStats(){  for (let i = 0; i < 80; i++){
+    await new Promise(r => setTimeout(r, 1500));
+    if (!relayBase) return;
+    let s = null;
+    try { s = await fetch(relayBase + '/stats?_=' + Date.now()).then(r => r.json()); } catch(e){}
+    if (!s && relayPort){
+      try { s = await fetch('/api/relaystats?p=' + relayPort + '&_=' + Date.now()).then(r => r.json()); } catch(e){}
+    }
+    if (s && typeof s.buffered_seconds === 'number'){
+      const b = $('#pillBuf');
+      b.textContent = Math.round(s.buffered_seconds) + 's buffered' + (s.dvr_seconds_stored ? ' \u00b7 ' + Math.round(s.dvr_seconds_stored/60*10)/10 + ' min stored' : '') + ' \u00b7 pull ' + Math.round(s.upstream_Mbps) + ' Mbps';
+      b.style.display = '';
+    }
+    // a single-rendition feed carries no RESOLUTION attribute, so the relay has
+    // no variant to report -- ask the decoder instead of leaving "-" up there
+    const q = $('#pillQ');
+    if (v.videoWidth && (q.style.display === 'none' || !q.textContent || q.textContent === '-')){
+      q.textContent = v.videoWidth + 'x' + v.videoHeight;
+      q.className = 'pill good';
+      q.style.display = '';
+    }
+  }
+}
+
+// distance from the live edge, straight from hls.js: this is the number to watch
+// if "it feels delayed" -- 7-15 s is the honest floor on 6 s segments
+setInterval(() => {
+  const p = $('#pillLat');
+  if (!p) return;
+  if (hls && typeof hls.latency === 'number' && isFinite(hls.latency) && hls.latency > 0){
+    p.textContent = hls.latency.toFixed(1) + 's behind live';
+    p.className = 'pill' + (hls.latency < 16 ? ' good' : '');
+    p.style.display = '';
+  } else if (!hls){
+    p.style.display = 'none';
+  }
+}, 1000);
+
+// Hard ceiling: for live sport a jump is better than watching the past. If the
+// edge ran away (upstream hiccup, tab in background), snap back to the target.
+// Pausing is the exception: that is the viewer asking to sit behind, so the ring
+// is grown instead (see dvrWindow) and the ceiling only fires past the ring.
+setInterval(() => {
+  if (!hls || !lastChannel) return;
+  const target = lowMode ? DELAY.low : DELAY.normal;
+  const lat = hls.latency;
+  if (typeof lat !== 'number' || !isFinite(lat)) return;
+  const ceiling = dvrHold ? Math.max(target * 6 + 4, dvrSeconds - 12) : target * 6 + 4;
+  if (lat > ceiling && typeof hls.liveSyncPosition === 'number'){
+    try { v.currentTime = hls.liveSyncPosition; } catch(e){}
+  }
+}, 5000);
+
+// ---------------------------------------------------------------- pause = DVR
+// "Pause, keep downloading, come back behind live" only works if the paused
+// position still exists when playback resumes. The relay keeps a RAM ring plus a
+// disk tier (deleted when it stops), so rewinding and long pauses are served
+// from what was already downloaded instead of racing the source. While the
+// viewer is deliberately behind, the snap-to-live ceiling is relaxed; "live"
+// gives the delay back.
+let dvrHold = false, dvrSeconds = 0, dvrMB = 0;
+
+function dvrWindow(n){
+  if (!relayBase) return;
+  fetch(relayBase + '/window?n=' + n + '&_=' + Date.now())
+    .then(r => r.json())
+    .then(j => { dvrSeconds = j.buffered_seconds || dvrSeconds; })
+    .catch(() => {});
+}
+
+function seekRel(delta){
+  if (!hls){ toast('nothing playing yet', 1800); return; }
+  // The relay keeps RAM + disk, so hls can fetch behind the playhead from the
+  // playlist; the only real limit is how much is stored, not what is buffered.
+  const edge = (typeof hls.liveSyncPosition === 'number') ? hls.liveSyncPosition : v.currentTime;
+  const stored = dvrSeconds || (lowMode ? 35 : 70);
+  const oldest = Math.max(0, edge - stored + 4);
+  const end = v.buffered.length ? v.buffered.end(v.buffered.length - 1) : edge;
+  let t = v.currentTime + delta;
+  if (t < oldest){
+    t = oldest;
+    toast('only ' + Math.round(stored / 60) + ' min is stored - going to the oldest kept second', 3200);
+  }
+  if (delta > 0 && t > end - 1.0) t = end - 1.0;
+  seekGraceUntil = Date.now() + 20000;
+  dvrHold = true;
+  dvrWindow(20);
+  v.currentTime = t;
+  toast((delta < 0 ? 'rewound ' + Math.abs(delta) : 'forward ' + delta) + 's', 1600);
+}
+
+function seekLive(){
+  if (!hls || typeof hls.liveSyncPosition !== 'number') return;
+  dvrHold = false;
+  dvrWindow(lowMode ? 5 : 10);
+  try { v.currentTime = hls.liveSyncPosition; v.play(); } catch(e){}
+  toast('back to live', 1800);
+}
+
+v.addEventListener('pause', () => {
+  dvrHold = true;
+  dvrWindow(20);                       // keep the ring while the picture is still
+});
+
+v.addEventListener('play', () => {
+  if (!dvrHold) dvrWindow(lowMode ? 5 : 10);
+});
+
+setInterval(() => {
+  // caught up on its own? stop holding extra history
+  if (dvrHold && hls && typeof hls.latency === 'number' && hls.latency < (lowMode ? DELAY.low : DELAY.normal) * 2){
+    dvrHold = false;
+    dvrWindow(lowMode ? 5 : 10);
+  }
+}, 5000);
+
+// click the "N s behind live" pill to give up the delay and go to the edge
+document.addEventListener('click', ev => {
+  const p = ev.target;
+  if (p && p.id === 'pillLat' && hls && typeof hls.liveSyncPosition === 'number'){
+    try { v.currentTime = hls.liveSyncPosition; v.play(); } catch(e){}
+    toast('jumped to live', 2000);
+  }
+});
+
+// ---------- stream resilience policy (games, desktop frame) ----------
+const pol = { start: 0, freezes: 0, curH: 0, cands: [], asked: false, game: null, timer: null };
+
+function polReset(game, curH){
+  pol.start = Date.now(); pol.freezes = 0; pol.curH = curH || 0;
+  pol.asked = false; pol.game = game; pol.cands = [];
+  if (pol.timer) clearInterval(pol.timer);
+  pol.timer = setInterval(polTick, 10000);
+  if (game) fetch('/api/candidates?u=' + encodeURIComponent(game.url))
+      .then(r => r.json()).then(j => { pol.cands = j.candidates || []; }).catch(()=>{});
+}
+
+function bestBetter(){
+  return pol.cands.filter(c => c.ok && c.frame && c.h > pol.curH)
+                 .sort((a,b) => b.h - a.h)[0] || null;
+}
+
+async function polTick(){
+  if (!pol.game) return;
+  let h = {};
+  try { h = await fetch('/api/health?u=' + encodeURIComponent(pol.game.url)).then(r => r.json()); } catch(e){ return; }
+  if (!h.ok || !h.lagging) return;              // not lagging -> leave it alone
+  const age = Date.now() - pol.start;
+  if (age < 120000) return;
+  const better = bestBetter();
+  if (better && !pol.asked) {
+    pol.asked = true;
+    const ok = window.confirm('This feed is lagging.\nA better one is available (' + better.h + 'p vs ' + (pol.curH||'?') + 'p).\n\nSwitch to it?');
+    if (ok) polSwitch(better);
+  } else if (!better && pol.freezes >= 3) {
+    const any = pol.cands.find(c => c.ok && c.frame);
+    if (any) polSwitch(any);
+  }
+}
+
+function polSwitch(c){
+  const pf = $('#pf');
+  pf.src = '/play?u=' + encodeURIComponent(c.frame) + '&_=' + Date.now();
+  $('#nowTitle').textContent = (pol.game ? pol.game.name : '') + '  (switched)';
+  toast('switched feed', 2500);
+  polReset(pol.game, c.h);
+}
+
+async function reportFreeze(){
+  if (!pol.game) { toast('nothing to report yet', 1800); return; }
+  pol.freezes++;
+  try { await fetch('/api/freeze?u=' + encodeURIComponent(pol.game.url)); } catch(e){}
+  toast('freeze ' + pol.freezes + ' of 3 logged', 2000);
+  if (pol.freezes >= 3){
+    const better = bestBetter();
+    if (better && !pol.asked){
+      pol.asked = true;
+      if (window.confirm('3 freezes on this feed.\nBetter feed available (' + better.h + 'p). Switch?')) polSwitch(better);
+    } else if (!better){
+      const any = pol.cands.find(c => c.ok && c.frame);
+      if (any) polSwitch(any);
+    }
+  }
+}
+
+let lastGame = null;
+
+// ---------------------------------------------------------------- harvest
+// The page-side stream resolver. The providers hide the manifest behind a
+// chain of wrapper pages; the last wrapper in every family so far names it in
+// plain script: a `globalurl = '<m3u8>'` constant (Game Pass clones), a
+// DIRECT_STREAM_URL constant (the crackstreams-style own-CDN restream), a
+// stream URL anywhere in the text, or a JSON rotator whose first entry is the
+// real target. Some providers ship the clear-key pair next to it
+// (masterinf = {"<kid hex>": "<key hex>"}), which lets org.w3.clearkey
+// decrypt an encrypted feed without a license server.
+const RX_GLOBALURL = /globalurl\s*=\s*['"]([^'"\r\n]+)['"]/i;
+const RX_DIRECT    = /DIRECT_STREAM_URL\s*=\s*['"]([^'"\r\n]+)['"]/i;
+const RX_M3U8      = /(https?:\/\/[^"'\s<>\\]+?\.(?:m3u8|mpd)[^"'\s<>\\]*)/i;
+const RX_IFRAME    = /<iframe[^>]*?\bsrc\s*=\s*['"]([^'"]+)['"]/i;
+const RX_JS_SRC    = /\.src\s*=\s*['"](https?:\/\/[^'"\r\n]+)['"]/;
+const RX_MASTERINF = /masterinf\s*=\s*\{([^}]{10,600})\}/i;
+const RX_KEYKV     = /"?([0-9a-fA-F]{16,64})"?\s*:\s*"?([0-9a-fA-F]{16,64})"?/g;
+const RX_ADISH     = /doubleclick|googlesyndication|adservice|popads|adcash|propellerads|histats\.com|onclick|hilltopads|exoclick/i;
+
+function adish(u){ return RX_ADISH.test(u || ''); }
+function joinUrl(base, ref){
+  try { return new URL(ref, base).toString(); } catch(e){ return ref; }
+}
+function hostOf2(u){ try { return new URL(u).hostname; } catch(e){ return ''; } }
+
+// one GET, wrapped: the app's plain fetch first (its HttpURLConnection has the
+// schedule-site cookies state), and its invisible engine when a host 403s the
+// plain path. Outside the app this is a plain fetch and the walker still
+// works for every provider that does not fingerprint TLS.
+async function hubFetch(u, referer){
+  if (STANDALONE && window.Hub && Hub.fetchText) return Hub.fetchText(u, referer || '');
+  const hd = { 'Accept-Language': 'en-US,en;q=0.9' };
+  if (referer) hd['Referer'] = referer;
+  const r = await fetch(u, { headers: hd });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.text();
+}
+
+function keysFrom(text){
+  const m = RX_MASTERINF.exec(text);
+  if (!m) return null;
+  const out = {};
+  RX_KEYKV.lastIndex = 0;
+  let km;
+  while ((km = RX_KEYKV.exec(m[1]))) out[km[1].toLowerCase()] = km[2].toLowerCase();
+  return Object.keys(out).length ? out : null;
+}
+
+/** next wrapper URL a page hands the picture to, or a manifest it names */
+function directIn(text){
+  let m = RX_GLOBALURL.exec(text);
+  if (m) return m[1];
+  m = RX_DIRECT.exec(text);
+  if (m) return m[1];
+  m = RX_M3U8.exec(text);
+  if (m) return m[1];
+  return null;
+}
+
+// Frames that are part of the page furniture, not the picture. Chasing one of
+// these is how the resolver ended up reading a chat widget instead of the
+// player (and then reporting "no stream" while the video was right there).
+const RX_CHATFRAME = /chat|discord|tawk|intercom|facebook\.com\/plugins|youtube\.com\/embed\/live_chat|disqus|comment|zendesk|crisp|livechat/i;
+function frameScore(host, src){
+  let s = 0;
+  if (RX_CHATFRAME.test(host) || RX_CHATFRAME.test(src)) return -100;
+  if (/\/main\//.test(src)) s += 6;
+  if (/\/top\//.test(src)) s += 5;
+  if (/\/iframe\//.test(src)) s += 5;
+  if (/\/embed/.test(src)) s += 4;
+  if (/\/player/.test(src)) s += 4;
+  if (/\/live/.test(src)) s += 2;
+  if (/stream|topstream|trend|embed/.test(host)) s += 3;
+  return s;
+}
+
+function nextHopIn(text){
+  // 1) the page's own named player frame, if it has one
+  const named = /<iframe[^>]*\bid\s*=\s*["'](?:stream|player|videoFrame|embed)[^"']*["'][^>]*\bsrc\s*=\s*["']([^"']+)["']/i.exec(text);
+  if (named && !adish(named[1]) && !RX_CHATFRAME.test(named[1])) return named[1];
+
+  // 2) every iframe on the page, ranked: the player beats chat/banner frames
+  let best = null, bestScore = -1;
+  const RX_ANY_IFRAME = /<iframe[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi;
+  let m;
+  while ((m = RX_ANY_IFRAME.exec(text))){
+    const src = m[1].replace(/&amp;/g, '&');
+    if (adish(src)) continue;
+    const sc = frameScore(hostOf2(src), src);
+    if (sc > bestScore){ bestScore = sc; best = src; }
+  }
+  if (best && bestScore >= 0) return best;
+
+  // 3) an iframe built in JavaScript (".src = url" with "iframe" nearby)
+  const RX_JSRC = /\.src\s*=\s*["'](https?:\/\/[^"'\r\n]+)["']/g;
+  while ((m = RX_JSRC.exec(text))){
+    const src = m[1];
+    if (adish(src) || RX_CHATFRAME.test(src)) continue;
+    const at = m.index;
+    const ctx = text.slice(Math.max(0, at - 260), at + 260).toLowerCase();
+    if (ctx.includes('iframe')) return src;
+  }
+  return null;
+}
+
+async function harvestChain(g, linksOverride){
+  let links = [];
+  if (linksOverride && linksOverride.length){ links = linksOverride.slice(0, 4); }
+  else {
+    try {
+      const j = await fetch('/api/resolve?u=' + encodeURIComponent(g.url)).then(r => r.json());
+      if (j && j.links && j.links.length) links = j.links.slice(0, 4);
+    } catch(e){}
+  }
+  if (!links.length) links = [g.url];
+  const report = { tried: [] };
+  for (const main of links){
+    let u = main, referer = g.url, keys = null;
+    const docs = [];
+    for (let hop = 0; hop < 6; hop++){
+      if (!u || docs.includes(u)) break;
+      let text = '';
+      try { text = await hubFetch(u, referer); }
+      catch(e){ report.tried.push('hop ' + hop + ' (' + hostOf2(u) + ') failed: ' + e.message); break; }
+      docs.push(u);
+      const k = keysFrom(text);
+      if (k) keys = k;
+      const found = directIn(text);
+      if (found){
+        let streamUrl = joinUrl(u, found);
+        // the provider's own player appends &sessionId=<guid> to this manifest
+        // family; without it the Akamai edge answers 400
+        if (!/sessionId=/i.test(streamUrl)){
+          streamUrl += '&sessionId=' + ([8,4,4,4,12]
+              .map(n => Array.from({length: n}, () =>
+                '0123456789abcdef'[Math.floor(Math.random()*16)]).join('')).join('-'));
+        }
+        // the hub needs the clear-key pair itself: the license endpoint reads
+        // it back out when hls.js runs the EME decrypt
+        if (keys){
+          try {
+            await fetch('/api/keys', { method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(Object.keys(keys).map(kid => ({ kid: kid, key: keys[kid] }))) });
+          } catch(e){}
+        }
+        return {
+          ok: true, m3u8: streamUrl,
+          via: hostOf2(found), referer: u, keys: keys, hops: docs
+        };
+      }
+      const nxt = nextHopIn(text);
+      if (!nxt){
+        report.tried.push('hop ' + hop + ' (' + hostOf2(u) + ') names no iframe and no stream');
+        break;
+      }
+      referer = u;
+      u = joinUrl(u, nxt);
+      if (adish(u)) break;
+    }
+  }
+  console.log('harvest failed:', report.tried);
+  return { ok: false, ...report };
+}
+function sniffStream(u, referer){
+  return new Promise(function(resolve){
+    if (!(STANDALONE && window.Hub && Hub.sniffStreamAsync)){ resolve(null); return; }
+    const id = 'sniff' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+    let done = false;
+    const finish = function(j){
+      if (done) return;
+      done = true;
+      try { delete window.__nbaSniff; } catch(e){ window.__nbaSniff = null; }
+      if (!j || !j.m3u8){ resolve(null); return; }
+      const keys = j.html ? keysFrom(j.html) : null;
+      if (keys){
+        fetch('/api/keys', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.keys(keys).map(kid => ({ kid: kid, key: keys[kid] }))) }).catch(function(){});
+      }
+      resolve({ ok: true, m3u8: j.m3u8, referer: j.referer || referer || '',
+                keys: keys, via: hostOf2(j.m3u8), sniffed: true });
+    };
+    // the app answers here, not as a return value: a blocking bridge call would
+    // freeze the renderer the invisible page needs to ask for its playlist
+    window.__nbaSniff = function(who, raw){
+      if (who !== id) return;
+      let j = null;
+      try { j = raw ? JSON.parse(raw) : null; } catch(e){}
+      finish(j);
+    };
+    try { Hub.sniffStreamAsync(u, referer || '', id); }
+    catch(e){ finish(null); return; }
+    setTimeout(function(){ finish(null); }, 20000);
+  });
+}
+
+
+// One place that opens the player frame, and one guard on it. A framed copy of a
+// player page is still a page somebody else wrote: it can navigate itself to an
+// ad wall or a "update your browser" screen. The proxy is our own origin, so the
+// frame's URL is readable -- if it is no longer a proxy URL, put the player back.
+let pfGoodSrc = '';
+function pfOpen(u){
+  pfGoodSrc = u;
+  pfRestores = 0;
+  const pf = $('#pf');
+  if (pf) pf.src = u;
+}
+let pfRestores = 0;
+(function(){
+  const pf = $('#pf');
+  if (!pf) return;
+  pf.addEventListener('load', function(){
+    let href = '';
+    try { href = this.contentWindow.location.href; } catch(e){ return; }
+    if (!href || href === 'about:blank' || href.indexOf('about:') === 0) return;
+    if (href.indexOf('/play?u=') >= 0 || href.indexOf('/watch?u=') >= 0) return;
+    if (!pfGoodSrc || pfRestores >= 3) return;
+    pfRestores++;
+    this.src = pfGoodSrc;
+    toast('that page tried to leave the player - put it back', 2400);
+  });
+})();
+
+// The site's player may hand its media window to window.open(). A sandboxed frame
+// cannot create one, so the patch inside every proxied page posts the URL here and
+// the picture goes in the same frame.
+//
+// The gate matters more than the feature: an ad calls window.open() far more often
+// than a player does, and "load whatever asked" is how the whole window ended up on
+// an ad landing page. A popup is only honoured when it names a player: same site as
+// the page being proxied, a host this session has already proxied, or a URL whose
+// path says /main/, /embed, /player, /secure/ or a manifest.
+const AD_HOST_RX = /(doubleclick|googlesyndication|adservice|google-analytics|adsterra|popads|popcash|propellerads|onclicksuper|onclickalgo|clickadu|hilltopads|exoclick|tsyndicate|juicyads|trafficjunky|revcontent|taboola|outbrain|mgid|zedo|profitablerate|adnium|galaksion|adspyglass|ad-maven|adcash|dtscdn|dtscout|mrktmtrcs|trend48|zedo)/i;
+const pfKnownHosts = new Set();
+function hostOf(u){ try { return new URL(u).hostname.toLowerCase(); } catch(e){ return ''; } }
+function regDomain(h){ const p = (h||'').split('.'); return p.length >= 2 ? p.slice(-2).join('.') : (h||''); }
+function playerish(u){ return /\/main\/|\/embed|\/player|\/live|\/watch|\/secure\/|\.m3u8|\.mpd/i.test(u || ''); }
+function pfUpstream(){
+  try {
+    const src = ($('#pf') || {}).getAttribute ? ($('#pf').getAttribute('src') || '') : '';
+    const m = /[?&]u=([^&]+)/.exec(src);
+    return m ? decodeURIComponent(m[1]) : '';
+  } catch(e){ return ''; }
+}
+function popupAllowed(u){
+  if (!u || !/^https?:\/\//i.test(u)) return false;
+  if (AD_HOST_RX.test(u)) return false;
+  const host = hostOf(u);
+  if (!host) return false;
+  const cur = hostOf(pfUpstream() || (lastGame && lastGame.url) || '');
+  if (cur && (host === cur || regDomain(host) === regDomain(cur))) return true;
+  if (pfKnownHosts.has(host)) return true;
+  if (playerish(u)) return true;
+  return false;
+}
+window.addEventListener('message', function(ev){
+  const d = ev.data;
+  if (!d || typeof d !== 'object') return;
+  if (d.nfl_wake){ fsUiWake(); return; }        // a touch landed inside the player frame
+  if (!d.nfl_popup) return;
+  const u = String(d.nfl_popup);
+  if (!popupAllowed(u)){
+    toast('an ad asked for a window - dropped', 2200);
+    return;
+  }
+  pfKnownHosts.add(hostOf(u));
+  if (hls){ try { hls.destroy(); } catch(e){} hls = null; }
+  document.body.classList.add('iframeMode');
+  $('#pf').style.display = 'block';
+  pfOpen('/play?u=' + encodeURIComponent(u) +
+         '&r=' + encodeURIComponent(d.nfl_ref || '') + '&_=' + Date.now());
+  toast('the player asked for a window - showing it here', 2600);
+});
+
+// The resolver struck out: no playlist came back from the wrapper chain or from
+// the rendered player page. Staying in the app and saying so beats handing the
+// user to a site whose whole business is overlays and popups.
+function showResolveFailed(g){
+  document.body.classList.remove('playing');
+  if (hls){ try { hls.destroy(); } catch(e){} hls = null; }
+  const idle = $('#idle');
+  if (!idle) return;
+  idle.style.display = 'flex';
+  idle.innerHTML = '';
+  const h1 = document.createElement('h1');
+  const pre = g && g.state && g.state !== 'in';
+  h1.textContent = pre ? 'no player on the page yet' : 'could not get the direct feed';
+  const p = document.createElement('p');
+  p.innerHTML = pre
+    ? 'this game has not tipped off (' + (g.time || 'later today') + '), and the wrapper pages only '
+      + 'put a player in place at game time.<br><b>retry</b> runs the resolver again at kickoff.'
+    : 'the wrapper pages handed over no playlist on this network.<br>'
+      + '<b>retry</b> runs the resolver again. <b>player page</b> opens the site&rsquo;s own '
+      + 'player inside the app (ads blocked, &#8962; or Back comes back here).';
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:10px;margin-top:4px';
+  const b1 = document.createElement('button');
+  b1.type = 'button';
+  b1.textContent = 'retry';
+  b1.style.cssText = 'background:#16281f;border:1px solid #2c4a39;color:#3ddc84;'
+    + 'padding:10px 18px;border-radius:9px;font:14px -apple-system,Segoe UI,sans-serif;cursor:pointer';
+  b1.onclick = function(){ idle.innerHTML = ''; watchGame(g); };
+  const b2 = document.createElement('button');
+  b2.type = 'button';
+  b2.textContent = 'player page';
+  b2.style.cssText = 'background:#1b1e24;border:1px solid #2a2d35;color:#c9cdd6;'
+    + 'padding:10px 18px;border-radius:9px;font:14px -apple-system,Segoe UI,sans-serif;cursor:pointer';
+  b2.onclick = function(){
+    if (window.Hub && Hub.openInternal) Hub.openInternal(g.url);
+    else location.href = g.url;
+  };
+  row.appendChild(b1);
+  row.appendChild(b2);
+  idle.appendChild(h1);
+  idle.appendChild(p);
+  idle.appendChild(row);
+}
+
+async function watchGame(g, useFrame){
+  lastGame = g;
+  setSpin(true, 'finding the feed that actually plays...');
+  $('#nowTitle').textContent = g.name;
+  $('#pillQ').style.display = 'none';
+  $('#pillBuf').style.display = 'none';
+
+  // Same walk as the phone, now on the PC too: try the plain-GET chain first -- no
+  // page JS, so no ad layer loads -- and play the manifest it names in our own
+  // <video> through the relay. A feed that is Widevine-packaged but ships its clear
+  // key in the open plays as well; only a real Widevine feed (no published key)
+  // falls through to the site's player page.
+  if (!STANDALONE && !IS_MOBILE){
+    try {
+      const hr = await fetch('/api/harvest?u=' + encodeURIComponent(g.url));
+      if (hr.ok){
+        const h = await hr.json();
+        const keys = (h && h.keys && Object.keys(h.keys).length) ? h.keys : null;
+        if (h && h.ok && h.m3u8 && (!h.drm || keys)){
+          if (hls){ try { hls.destroy(); } catch(e){} hls = null; }
+          lastChannel = null;
+          document.body.classList.remove('iframeMode');
+          toast(keys ? 'harvested the feed and its published key - playing here'
+                     : 'harvested the feed - playing it here, no player page, no ads', 3000);
+          await playChannel({ name: g.name, url: h.m3u8, referer: h.referer }, false, keys);
+          return;
+        }
+        if (h && h.drm && !keys)
+          toast('this mirror is Widevine with no published key - using the player page', 3200);
+      }
+    } catch(e){}
+  }
+
+  // The phone cannot play these feeds inside this page: they are Widevine and
+  // EME refuses a non-secure origin (http://192.168.x.x is not one), so the
+  // in-page iframe stays black. A top-level navigation to the https player is
+  // a secure context and the only path that can decrypt on a phone.
+  if (IS_MOBILE){
+    // ---- resolve to the actual stream, not to the page that plays it ----
+    // The "Main N" page is wrapper after wrapper until one of them names the
+    // manifest (and usually leaks the clear-key pair alongside it). The walk
+    // happens here, one plain GET at a time through the app: when a wrapper's
+    // host 403s the plain fetch (Cloudflare fingerprints JVM TLS), the app
+    // renders that single page inside its invisible engine and hands back
+    // only the rendered text. No JS from any of these hosts runs on the
+    // visible screen, so the ad layers never reach the user.
+    if (STANDALONE){
+      setSpin(true, 'resolving the stream link directly...');
+      $('#nowTitle').textContent = g.name;
+      let h = null;
+      try { h = await harvestChain(g, useFrame ? [useFrame] : null); }
+      catch(e){ toast('direct resolve failed (' + e.message + ') - trying the player page', 3200); }
+      // The plain-GET walk stops at a chain built in JavaScript. Those pages are
+      // rendered by the app's invisible engine instead -- no screen, no popups,
+      // ad hosts blocked -- and only the media playlist it asks for comes back.
+      if (!(h && h.m3u8)){
+        let jr = null;
+        try { jr = await fetch('/api/resolve?u=' + encodeURIComponent(g.url)).then(r => r.json()); } catch(e){}
+        const cand = [];
+        if (jr && jr.browser) cand.push(jr.browser);
+        if (jr && jr.open && cand.indexOf(jr.open) < 0) cand.push(jr.open);
+        if (g.url && cand.indexOf(g.url) < 0) cand.push(g.url);
+        for (let i = 0; i < cand.length && i < 3; i++){
+          setSpin(true, 'reading the player page for its stream...');
+          const s = await sniffStream(cand[i], cand[i] === g.url ? '' : g.url);
+          if (s && s.m3u8){ h = s; toast('stream found - playing it in the app, no page', 3000); break; }
+        }
+      }
+      if (h && h.m3u8){
+          if (hls){ try { hls.destroy(); } catch(e){} hls = null; }
+          lastChannel = { name: g.name, url: h.m3u8 };   // the failover pool belongs to this game now
+          gameNow = g;
+          mirrorTried.clear(); mirrorReason = '';
+          document.body.classList.remove('iframeMode');
+          const srcPill = $('#pillSrc');
+          if (srcPill){
+            srcPill.textContent = 'direct feed - no ads' + (h.via ? ' \u00b7 via ' + h.via : '');
+            srcPill.className = 'pill good'; srcPill.style.display = '';
+          }
+          toast('direct feed resolved - playing in-app', 3000);
+          // shaka handles the clearkey-encrypted HLS the way the provider's own
+          // player does; it reads the relay, so nothing is cross-origin
+          await playChannel({ name: g.name, url: h.m3u8, referer: h.referer },
+                            false, h.keys, true,
+                            !!(h.keys && typeof shaka !== 'undefined'));
+          return;
+      }
+      // Nothing resolved. Do NOT dump the user into the ad-filled site: offer
+      // the two honest choices and stay on our own page.
+      setSpin(false);
+      showResolveFailed(g);
+      return;
+    }
+    let j = null;
+    try { j = await fetch('/api/resolve?u=' + encodeURIComponent(g.url)).then(r => r.json()); } catch(e){}
+    setSpin(false);
+    // A phone's WebView can decrypt these feeds only when it has a Widevine key
+    // system; know that before promising a picture, instead of showing a black
+    // rectangle and leaving the browser chip as the only way out.
+    if (await drmState(2000) === false)
+      toast('this webview reports no Widevine key system - if it stays black, the browser chip plays it', 6500);
+    // standalone: the "Main N" page itself, which embeds its player the way the
+    // player host allows; the frame alone refuses to play outside its own sites
+    const target = (j && (STANDALONE ? (j.browser || j.open) : (j.open || j.frame))) || g.url;
+    if (!j || !j.ok){
+      // one tap should produce the picture, not a question. The probe can only
+      // check a feed that is already playing; before tip-off every mirror says
+      // "not yet", so asking here just adds a click between you and the page.
+      toast('opening the stream page in the app', 2400);
+    } else if (g.state !== 'in'){
+      toast('not kickoff yet \u2014 the page has the stream at ' + (g.time || 'game time'), 4200);
+    }
+    $('#nowTitle').textContent = g.name + '  \u2014  opening player';
+    hideUnmute();
+    // Widevine cannot be decrypted by a webview without EME; Chrome on the same
+    // phone can. Hand the link over instead of showing a black rectangle.
+    if (STANDALONE && Hub.openInternal){
+      if (hls){ hls.destroy(); hls = null; }      // one stream at a time on mobile data
+      try { v.pause(); } catch(e){}
+      toast('opening the game player \u2014 \u2302 or Back returns here', 3200);
+      Hub.openInternal(target);
+      return;
+    }
+    // the PC-hub app (1.x) on an http://192.168.x.x origin has no EME at all
+    if (IN_APP && window.Hub && Hub.openExternal){
+      toast('opening the game in your browser', 3200);
+      Hub.openExternal(target);
+      return;
+    }
+    if (window.Hub && Hub.openInternal) Hub.openInternal(target);
+    else location.href = target;
+    return;
+  }
+
+  try {
+    const j = await fetch('/api/resolve?u=' + encodeURIComponent(g.url)).then(r => r.json());
+    const target = j.open || j.frame;
+    if (!(j && j.ok && target)) { toast('no working feed found for this game right now', 4500); setSpin(false); return; }
+    if (await drmState(2500) === false)
+      toast('this browser has no Widevine key system - the picture will stay black', 6000);
+    pfKnownHosts.add(hostOf(g.url));
+    pfKnownHosts.add(hostOf(target));
+    const pf = $('#pf');
+    if (hls){ hls.destroy(); hls = null; }
+    document.body.classList.remove('playing');
+    document.body.classList.add('iframeMode');
+    pf.style.display = 'block';
+    // r=<event page>: the Referer the upstream player expects. The hub makes the
+    // request itself, so this is the identity it leaves with -- and the window
+    // never has to hand the game off to a browser.
+    pfOpen('/play?u=' + encodeURIComponent(target) +
+           '&r=' + encodeURIComponent(g.url) + '&_=' + Date.now());
+    const srcPill = $('#pillSrc');
+    if (srcPill){
+      let h = ''; try { h = new URL(target).hostname; } catch(e){}
+      srcPill.textContent = 'site player - ' + (h || 'external') + (h.indexOf('akamaized') >= 0 || h.indexOf('nfl') >= 0 ? '  (Game Pass)' : '');
+      srcPill.className = 'pill'; srcPill.style.display = '';
+    }
+    $('#reloadStream').style.display = 'block';
+    polReset(g, (j.probe || {}).h || 0);
+    const st = j.probe || {};
+    if (st.w){ $('#pillQ').textContent = st.w + 'x' + st.h + ' \u00b7 playing'; $('#pillQ').className='pill good'; $('#pillQ').style.display=''; }
+    toast('feed found - ' + (st.h ? st.h + 'p' : 'live'), 3000);
+  } catch(e){ toast('could not open that game', 4000); }
+  setSpin(false);
+}
+
+function shiftDay(n){
+  $('#note').className = '';
+  const d = new Date(curDate + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  curDate = toISO(d);
+  loadGames();
+}
+$('#prev').onclick = () => shiftDay(-1);
+$('#next').onclick = () => shiftDay(1);
+$('#dateLabel').onclick = () => {
+  const pick = prompt('date (YYYY-MM-DD)', curDate);
+  if (pick && /^\d{4}-\d{2}-\d{2}$/.test(pick)){ curDate = pick; loadGames(); }
+};
+$('#search').oninput = render;
+
+function fsTarget(){
+  return document.body.classList.contains('iframeMode') ? $('#pf') : v;
+}
+function isFullscreen(){
+  return !!(document.fullscreenElement || document.webkitFullscreenElement ||
+            (v && v.webkitDisplayingFullscreen));
+}
+function exitFullscreen(){
+  if (document.exitFullscreen) { document.exitFullscreen().catch(() => {}); return; }
+  if (document.webkitExitFullscreen) { document.webkitExitFullscreen(); return; }
+  if (v && v.webkitExitFullscreen) v.webkitExitFullscreen();
+  tellAppFullscreen(false);
+}
+// In the app, fullscreen also means landscape: the WebView cannot rotate itself,
+// so hand the decision to MainActivity (Hub.setFullscreen) on every change.
+function tellAppFullscreen(on){
+  try { if (window.Hub && Hub.setFullscreen) Hub.setFullscreen(!!on); } catch(e){}
+  // the app's own fullscreen (landscape, no system bars) is not the Fullscreen API,
+  // so the page has to remember it itself -- otherwise the chrome never fades there
+  document.body.classList.toggle('appfs', !!on);
+  if (on) fsUiWake(); else fsUiReset();
+}
+$('#fs').onclick = () => {
+  tellAppFullscreen(true); if (isFullscreen()){ exitFullscreen(); return; }
+  // Fullscreen the *container*, never the raw video: our CSS then owns the
+  // geometry (object-fit:contain => letterbox), on desktop and in a WebView
+  // alike. The old Android path called video.webkitEnterFullscreen(), which
+  // hands the picture to the platform's native player -- that one ignores
+  // object-fit and stretched a 16:9 stream on a 16:10 screen.
+  const el = fsTarget();
+  const target = (el.tagName === 'VIDEO' && stage) ? stage : el;
+  if (target.requestFullscreen){
+    target.requestFullscreen().catch(() => toast('fullscreen was blocked - maximise the window instead', 2600));
+    return;
+  }
+  if (target.webkitRequestFullscreen){ target.webkitRequestFullscreen(); return; }
+  if (el.tagName === 'VIDEO' && el.webkitEnterFullscreen){    // last resort (iOS)
+    try { el.webkitEnterFullscreen(); } catch(e){ toast('fullscreen was blocked here', 2200); }
+    return;
+  }
+  toast('fullscreen is not available here', 2200);
+};
+$('#fsexit').onclick = () => exitFullscreen();
+
+// ---- fullscreen chrome that gets out of the way -------------------------
+// Two exits are in play on a phone: the Fullscreen API (which the WebView renders
+// through onShowCustomView) and the app's own "landscape + no system bars" mode
+// (Hub.setFullscreen). Both count as fullscreen here, so the same rule holds
+// whichever one you landed in: nothing on screen but the picture, unless you touch.
+function fsActive(){
+  return isFullscreen() || document.body.classList.contains('appfs');
+}
+let fsIdle = null;
+function fsUiWake(){
+  document.body.classList.remove('fsfade');
+  if (fsIdle) clearTimeout(fsIdle);
+  fsIdle = null;
+  if (!fsActive()) return;
+  fsIdle = setTimeout(function(){
+    // the platform's progress bar is the other thing that never leaves
+    if (IS_MOBILE) { try { v.controls = false; } catch(e){} }
+    document.body.classList.add('fsfade');
+  }, 2600);
+}
+function fsUiReset(){
+  if (fsIdle) clearTimeout(fsIdle);
+  fsIdle = null;
+  document.body.classList.remove('fsfade');
+  try { v.controls = true; } catch(e){}
+}
+['pointerdown','pointermove','touchstart','keydown','wheel'].forEach(function(ev){
+  document.addEventListener(ev, function(){ if (fsActive()) fsUiWake(); }, { passive: true });
+});
+// keep the button label honest whichever way fullscreen ends (Esc included)
+['fullscreenchange','webkitfullscreenchange'].forEach(function(ev){
+  document.addEventListener(ev, function(){
+    const b = $('#fs');
+    if (b) b.textContent = isFullscreen() ? 'exit full' : 'fullscreen';
+    tellAppFullscreen(isFullscreen());
+    if (isFullscreen()) fsUiWake(); else fsUiReset();
+  });
+});
+$('#low').onclick = () => {
+  lowMode = !lowMode;
+  $('#low').style.color = lowMode ? 'var(--accent)' : '';
+  $('#low').style.borderColor = lowMode ? '#2c4a39' : '';
+  toast(lowMode ? 'low delay on - ~20s behind live, less cushion' : 'low delay off - bigger cushion, smoother', 3000);
+  if (lastChannel) playChannel(lastChannel);
+};
+$('#reload').onclick = () => {
+  dates = [];
+  // the phone app re-reads the stream sites and feeds.txt on this; the PC hub
+  // answers 404 and its own 4-minute cache applies -- either way, reload
+  fetch('/api/refresh?_=' + Date.now()).catch(() => {}).then(() => boot());
+};$('#freezeBtn').onclick = () => reportFreeze();
+$('#live').onclick = () => seekLive();
+$('#unmute').onclick = function(){ soundOn(); };
+// the picture itself is the biggest "tap for sound" target there is
+stage.addEventListener('click', function(ev){
+  if (!v.muted) return;
+  if (ev.target && (ev.target.closest && ev.target.closest('button'))) return;
+  soundOn();
+}, true);
+$('#snd').onclick = function(){ if (v.muted) soundOn(); else soundOff(); };
+// starting playback anywhere (game or channel) restores the pill's label
+v.addEventListener('plays', function(){ soundState(); });
+$('#reloadStream').onclick = () => {
+  const pf = $('#pf');
+  const base = (pf.getAttribute('src') || '').split('&_=')[0];
+  if (!base) return;
+  pfOpen(base + '&_=' + Date.now());
+  toast('reloading stream', 1800);
+};
+
+function browserName(){
+  const ua = navigator.userAgent;
+  const v = re => { const m = ua.match(re); return m ? m[1] : ''; };
+  if (/Edg\//.test(ua)) return 'Edge ' + v(/Edg\/([\d.]+)/);
+  if (/OPR\//.test(ua)) return 'Opera ' + v(/OPR\/([\d.]+)/);
+  if (/Firefox\//.test(ua)) return 'Firefox ' + v(/Firefox\/([\d.]+)/);
+  // no \b: "HeadlessChrome/156" must count as Chrome too
+  if (/Chrome\//.test(ua)){
+    const ver = v(/Chrome\/([\d.]+)/);
+    return IN_APP ? 'Android app (Chrome WebView ' + ver + ')' : 'Chrome ' + ver;
+  }
+  if (/Safari\//.test(ua)) return 'Safari ' + v(/Version\/([\d.]+)/);
+  return ua;
+}
+
+// ---------- diagnostics (long-press the title) ----------
+async function diag(){
+  const rows = [];
+  const add = (k, val) => rows.push([k, String(val)]);
+  add('window', browserName());
+  add('page', location.href);
+  add('user agent', navigator.userAgent);
+  add('secure context', window.isSecureContext === undefined ? '?' : window.isSecureContext);
+  add('mobile / in app', IS_MOBILE + ' / ' + IN_APP);
+  add('hls.js', window.Hls ? (Hls.version || 'loaded') : 'MISSING');
+  add('MSE', !!(window.MediaSource));
+  add('device', (navigator.hardwareConcurrency || '?') + ' cores, dpr ' + (window.devicePixelRatio||1));
+  let drm = 'checking...';
+  try {
+    if (!navigator.requestMediaKeySystemAccess) drm = 'no EME in this webview';
+    else {
+      const cfg = [{
+        initDataTypes: ['cenc'],
+        videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"',
+                              robustness: 'SW_SECURE_CRYPTO' }]
+      }];
+      const acc = await navigator.requestMediaKeySystemAccess('com.widevine.alpha', cfg);
+      let keys = '?';
+      try { await acc.createMediaKeys(); keys = 'ok'; } catch(e){ keys = 'createMediaKeys: ' + e.message; }
+      drm = acc.keySystem + ' level available, keys ' + keys;
+    }
+  } catch(e){ drm = 'Widevine unavailable: ' + (e && e.message || e); }
+  add('widevine', drm);
+  add('relay', relayBase || '(none started)');
+  add('now playing', $('#nowTitle').textContent);
+  try {
+    const p = await fetch('/api/ping?_=' + Date.now()).then(r => r.json());
+    add('hub', JSON.stringify(p));
+  } catch(e){ add('hub', 'unreachable: ' + e.message); }
+  if (hls && hls.levels && hls.levels.length){
+    add('levels', hls.levels.map(l => (l.width||'?') + 'x' + (l.height||'?') + '@' + Math.round((l.bitrate||0)/1000) + 'k').join(', '));
+  }
+  if (hls){
+    try {
+      add('latency', (typeof hls.latency === 'number' ? hls.latency.toFixed(2) : '?') + ' s behind live');
+      add('buffer', 'hls ' + (hls.mainForwardBufferInfo ? hls.mainForwardBufferInfo().len.toFixed(1) : '?') + ' s ahead');
+      add('stalls', stallCount + ' (video waiting events since page load)');
+      add('mirror', (mirrorIdx + 1) + '/' + channels.length +
+          '  tried ' + mirrorTried.size + (mirrorReason ? '  last fail: ' + mirrorReason : ''));
+      add('delay target', (lowMode ? DELAY.low : DELAY.normal) + ' x ' + hls.targetLatency + 's');
+    } catch(e){ add('hls stats', String(e)); }
+  }
+  if (v && v.currentTime !== undefined){
+    add('video', 'readyState ' + v.readyState + ' / t ' + (Math.round(v.currentTime*10)/10) + 's / ' +
+        (v.videoWidth||0) + 'x' + (v.videoHeight||0) + ' / muted ' + v.muted + ' / paused ' + v.paused);
+  }
+  const body = document.getElementById('diagBody');
+  body.innerHTML = '<h2>diagnostics</h2><table>' +
+    rows.map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') + '</table>';
+  document.getElementById('diag').classList.add('show');
+}
+$('#diagClose').onclick = () => document.getElementById('diag').classList.remove('show');
+
+let lpTimer = null;
+$('#brand').addEventListener('pointerdown', () => {
+  clearTimeout(lpTimer); lpTimer = setTimeout(diag, 700);
+});
+['pointerup','pointercancel','pointerleave'].forEach(ev =>
+  $('#brand').addEventListener(ev, () => clearTimeout(lpTimer)));
+
+async function boot(){
+  curDate = todayISO();
+  try {
+    const saved = localStorage.getItem(DATE_KEY);
+    if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved)) curDate = saved;
+  } catch(e){}
+  try {
+    const [ch, dt] = await Promise.all([
+      fetch('/api/channels?_=' + Date.now()).then(r => r.json()).catch(() => ({channels: []})),
+      fetch('/api/dates?_=' + Date.now()).then(r => r.json()).catch(() => ({dates: []}))
+    ]);
+    channels = ch.channels || [];
+    dates = dt.dates || [];
+    if (dt.season && dt.season.start && dt.season.end) season = dt.season;
+  } catch(e){ channels = []; dates = []; }
+
+  let today = { games: [] };
+  try {
+    today = await fetch('/api/games?date=' + curDate + '&_=' + Date.now()).then(r => r.json());
+  } catch(e){}
+
+  // only auto-advance when the user has not picked a date themselves
+  if (!(today.games || []).length && curDate === todayISO()){
+    const next = dates.find(d => d > curDate) || dates[dates.length - 1];
+    const n = $('#note');
+    if (next){
+      curDate = next;
+      n.className = 'show';
+      n.textContent = 'No NFL games listed today. Showing the next slate: ' + labelFor(next).sub + '.';
+    } else {
+      n.className = 'show';
+      n.textContent = 'No NFL games listed right now. NFL TV below is always on.';
+    }
+  }
+  await loadGames();
+
+  // deep link: /?chan=0 plays the Nth NFL TV channel straight away
+  const qp = new URLSearchParams(location.search);
+  if (qp.has('chan')){
+    const i = parseInt(qp.get('chan'), 10);
+    if (!isNaN(i) && channels[i]) playChannel(channels[i]);
+  }
+  if (IN_APP && window.Hub && Hub.hubReady) Hub.hubReady();
+}
+
+// PC keyboard: f fullscreen, m mute, r reload the feed, Esc exits fullscreen
+addEventListener('keydown', function(e){
+  const tag = (document.activeElement && document.activeElement.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  const k = (e.key || '').toLowerCase();
+  if (k === 'f'){ e.preventDefault(); $('#fs').click(); }
+  else if (k === 'm'){ e.preventDefault(); v.muted = !v.muted; hideUnmute(); toast(v.muted ? 'muted' : 'sound on', 1400); }
+  else if (k === 'r' && lastChannel){ e.preventDefault(); playChannel(lastChannel); }
+});
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "nfl hub cleaner",
+  "version": "1.2",
+  "description": "Kills popups and hides everything except the video on stream pages.",
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.foxiy.st/*",
+        "*://*.methstreams.st/*",
+        "*://*.crackstreams.st/*",
+        "*://*.topstreamer.site/*",
+        "*://*.streameast.*/*",
+        "*://*.sportsurges.st/*",
+        "*://*.720pstream.*/*",
+        "*://*.vipbox.*/*",
+        "*://*.daddylive.*/*",
+        "*://*.totalsportek.*/*"
+      ],
+      "css": ["clean.css"],
+      "js": ["clean.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}

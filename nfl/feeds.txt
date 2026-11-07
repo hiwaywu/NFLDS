@@ -1,0 +1,14 @@
+# ------------------------------------------------------------------
+#  feeds.txt  --  the NFL channel list
+#
+#  Format:   NAME | URL            (an optional 3rd column sets a Referer)
+#  Order matters: the first one that passes gets played, so best is on top.
+#  Anything starting with # is ignored.
+#
+#  Verified 2026-11-07 19:10 EST: master playlist parsed, first segment
+#  200 OK on all three.
+# ------------------------------------------------------------------
+
+NFL Channel 1080p    -- Samsung TV Plus / Akamai    | https://pb-we3ltka9xobj6.akamaized.net/master.m3u8
+NFL Channel 720p     -- Pluto (AES-128, relay keeps the key) | https://jmp2.uk/plu-5ced7d5df64be98e07ed47b6.m3u8
+NFL Network 480p     -- backup relay                | https://tvsen6.aynaott.com/nfl/index.m3u8

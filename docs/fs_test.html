@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>fs test</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  /* exactly the rule the hub page uses */
+  video{width:100%;height:100%;object-fit:contain;object-position:center;background:#000}
+  video:fullscreen,video:-webkit-full-screen{object-fit:contain !important;object-position:center !important}
+  #b{position:fixed;left:8px;top:8px;z-index:5;font:14px sans-serif;padding:8px 12px}
+</style></head>
+<body>
+<video id="v" playsinline muted loop src="white1080.mp4"></video>
+<button id="b" onclick="go()">fullscreen</button>
+<script>
+  const v = document.getElementById('v');
+  v.play().catch(()=>{});
+  function go(){
+    const el = document.getElementById('v');
+    if (document.fullscreenElement){ document.exitFullscreen(); return; }
+    el.requestFullscreen().catch(e => { document.title = 'fs failed: ' + e.message; });
+  }
+  window.fsInfo = () => ({
+    hasRequestFS: typeof v.requestFullscreen === 'function',
+    hasWebkitEnter: typeof v.webkitEnterFullscreen === 'function',
+    fsEl: document.fullscreenElement ? document.fullscreenElement.tagName : null,
+    objectFit: getComputedStyle(v).objectFit,
+    rect: v.getBoundingClientRect().toJSON(),
+    videoSize: [v.videoWidth, v.videoHeight]
+  });
+</script>
+</body></html>

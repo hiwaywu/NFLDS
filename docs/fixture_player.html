@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>fixture player</title>
+<style>
+  html,body{background:#111;margin:0;height:100%}
+  video{width:100%;height:100%;object-fit:contain;display:block}
+  #ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      background:rgba(0,0,0,.6);color:#fff;font:20px -apple-system,Segoe UI,sans-serif}
+  #ov.hide{display:none}
+</style></head><body>
+<video src="white1080.mp4" playsinline preload="auto"></video>
+<div id="ov" class="overlay play">click to play</div>
+<script>
+  document.querySelector('#ov').addEventListener('click', function () {
+    this.classList.add('hide');
+    var v = document.querySelector('video');
+    v.play().catch(function () {});
+  });
+</script>
+</body></html>

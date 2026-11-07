@@ -1,0 +1,35 @@
+# build output
+android/build/
+android/debug.keystore
+android/*.idsig
+android/NFLHub.apk
+*.keystore
+dist/
+
+# runtime state
+nfl/hub/browserprofile/
+nfl/hub/appprofile/
+nfl/rec/
+nfl/_src/
+nfl/*.log
+nfl/hub/*.log
+nfl/dvr/
+
+# python
+__pycache__/
+*.pyc
+
+# os
+Thumbs.db
+.DS_Store
+.freebuff/
+
+# big binaries live in GitHub Releases
+releases/*.zip
+releases/*-oldkey.apk
+
+# launcher build output (the shipped copy is nfl/hub/NFLHub.exe)
+pc/*.exe
+
+# portable bundle build output
+build-portable/

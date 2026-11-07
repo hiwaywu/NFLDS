@@ -1,0 +1,14 @@
+# sites.txt -- pages refresh.ps1 will scrape for raw .m3u8 links.
+# Add or remove lines freely. Only http(s) lines are read.
+# These are sports index pages; the scraper just looks for .m3u8 strings in them.
+
+https://720pstream.cx/NFL
+https://720pstream.cx/
+https://totalsportek.pk/NFL
+https://methstreams.st/home
+https://crackstreams.st/home
+https://sportsurges.st/
+https://vipbox.ink/
+https://daddylive.me/
+https://streamed.pk/
+https://footybite.pk/
