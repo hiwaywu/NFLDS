@@ -1,4 +1,4 @@
-﻿"""Does a gated, popup-using, licence-POSTing player page play inside the app window?
+"""Does a gated, popup-using, licence-POSTing player page play inside the app window?
 
     python tools/verify_inapp_game.py            # headful, the real --app window
     python tools/verify_inapp_game.py --json     # machine-readable
@@ -283,13 +283,19 @@ def main():
             ADWIN = ORIGIN + "/adwin"
             play3 = "/play?u=" + urllib.parse.quote(ADWIN, safe="") + \
                     "&r=" + urllib.parse.quote(EVENT, safe="")
-            show(play3)
-            st3 = wait(lambda: (lambda s: s if (s and "/play?u=" in (s.get("url") or "")
-                                                and moving(s)) else None)(
-                frame_state("/embed/player")), 20)
-            page.wait_for_timeout(1500)
-            src3 = page.evaluate("() => (document.querySelector('#pf') || {}).getAttribute('src') || ''")
-            st3 = frame_state("/embed/player")
+            src3, st3 = "", None
+            for attempt in range(3):
+                show(play3)
+                st3 = wait(lambda: (lambda s: s if (s and "/play?u=" in (s.get("url") or "")
+                                                    and moving(s)) else None)(
+                    frame_state("/embed/player")), 20)
+                page.wait_for_timeout(1500)
+                src3 = page.evaluate(
+                    "() => (document.querySelector('#pf') || {}).getAttribute('src') || ''")
+                st3 = frame_state("/embed/player")
+                if "/play?u=" in src3 and moving(st3):
+                    break
+                page.wait_for_timeout(1500)
             check("ad: an ad's window.open() did not replace the player",
                   "/play?u=" in src3 and "ads.example.net" not in src3,
                   src3[:160])

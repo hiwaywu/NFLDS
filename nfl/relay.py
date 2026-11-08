@@ -86,6 +86,20 @@ def fetch_text(sess, url, timeout=12):
     return r.text
 
 
+def fetch_text_final(sess, url, timeout=12):
+    """(text, the URL that actually answered).
+
+    A master playlist is often a redirect (jmp2.uk -> Pluto's stitcher, a shortener,
+    a geo edge). Its variant URIs are relative *to the final URL*, so joining them
+    against the URL we asked for produces a request on the wrong host -- and with a
+    stitcher's `jwt=` query in the path that request is also enormous, which is how a
+    perfectly good 720p channel failed with "414 URI Too Long".
+    """
+    r = sess.get(url, timeout=timeout)
+    r.raise_for_status()
+    return r.text, (r.url or url)
+
+
 def fetch_bytes(sess, url, timeout=20):
     r = sess.get(url, timeout=timeout)
     r.raise_for_status()
@@ -231,16 +245,18 @@ class Relay:
 
     # ---- resolve master -> best rendition ----
     def resolve(self):
-        txt = fetch_text(self.sess, self.url)
+        txt, final = fetch_text_final(self.sess, self.url)
+        self.final_url = final
         if "#EXT-X-STREAM-INF" in txt:
-            vs = parse_master(txt, self.url)
+            vs = parse_master(txt, final)
             if not vs:
                 raise RuntimeError("master playlist had no variants")
             best = vs[0]
             self.variant_info = best
             self.url = best["url"]
+            res = (f"{best['w']}x{best['h']}" if best["w"] else "(no RESOLUTION)")
             print(f"[relay] {len(vs)} rendition(s); picked "
-                  f"{best['w']}x{best['h']} @ {best['bw']/1e6:.2f} Mbps")
+                  f"{res} @ {best['bw']/1e6:.2f} Mbps")
         else:
             print("[relay] direct media playlist (single rendition)")
 
@@ -253,10 +269,12 @@ class Relay:
                 self.stop.set()
                 break
             try:
-                txt = fetch_text(self.sess, self.url)
+                txt, final = fetch_text_final(self.sess, self.url)
                 m = parse_media(txt)
                 self.target = max(1.0, m["target"])
-                base = self.url
+                # segments are relative to the URL that answered, not the one asked for
+                base = final
+                self.url = final if final else self.url
                 if m["map"] and not self.map_data:
                     self.map_uri = urllib.parse.urljoin(base, m["map"])
                     self.map_data = fetch_bytes(self.sess, self.map_uri)

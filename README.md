@@ -73,6 +73,23 @@ adb shell am start -n com.nflds.app/.MainActivity --es url https://host/main/1  
    hub with the site's `Referer`/`Origin`, every nested frame rehosted, and `window.open()` turned
    into the picture in the same frame. That is the path that made games playable in-app at all.
 
+## Best stream, in that order
+
+Four decisions decide what you actually watch, and each one is measured rather than assumed:
+
+| Decision | Rule | Measured on this build |
+|---|---|---|
+| which source lists the game | `GAME_SOURCES` order — methstreams, then crackstreams; the first that lists the matchup wins | both list 25 events for a Sunday slate |
+| which player link | the game's `Main 1 → Main 4` in the site's own order; a chain that names no manifest is skipped | live college chain resolved on `Main 1`, hop 2 |
+| which rendition | the relay sorts the master by **height, then bandwidth** and takes the top; a master with no `RESOLUTION` lines is picked by bandwidth | NFL Channel: 360p / 720p / 1080p@5.1M / 1080p@8.1M → **1920x1080 @ 8.46 Mbps, 29.97 fps**, 40 MB in the first 5 s |
+| which channel | `feeds.txt` order (best on top); the page walks to the next one when a relay fails, and the pill names what is playing | 1080p Akamai → 720p Pluto (top rung 3321 k) → 480p aynaaott (768x432 @ 1.29 Mbps) |
+
+Two failure rules keep "best" from meaning "broken": a harvested manifest that will not start falls
+through to the site's player page instead of leaving a spinner, and a feed that redirects is resolved
+against the **URL that answered** — a shortener in front of a playlist is normal, and joining the
+variants against the URL you asked for sends them to the wrong host (that one cost the Pluto channel
+a `414 URI Too Long` until it was fixed).
+
 ## NFL TV
 
 Three always-on channels, verified 2026-11-07 (master playlist parsed, first segment 200):

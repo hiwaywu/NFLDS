@@ -494,6 +494,13 @@ async function playChannel(c, byMirror, keys, fromGame, useShaka){
       $('#pillQ').textContent = variant.w + 'x' + variant.h + ' @ ' + (variant.fps || '?') + 'fps';
       $('#pillQ').className = 'pill good';
       $('#pillQ').style.display = '';
+    } else if (variant.bw){
+      // a master without RESOLUTION lines (Pluto's stitcher is one): the relay picks
+      // by bandwidth then, so say what it picked instead of "0x0"
+      $('#pillQ').textContent = Math.round(variant.bw / 1000) + ' kbps' +
+                                (variant.fps ? ' @ ' + variant.fps + 'fps' : '');
+      $('#pillQ').className = 'pill good';
+      $('#pillQ').style.display = '';
     }
     const srcPill = $('#pillSrc');
     if (srcPill){ srcPill.textContent = 'relay - ' + (c.name || 'channel'); srcPill.className = 'pill good'; srcPill.style.display = ''; }
@@ -1337,8 +1344,15 @@ async function watchGame(g, useFrame){
           document.body.classList.remove('iframeMode');
           toast(keys ? 'harvested the feed and its published key - playing here'
                      : 'harvested the feed - playing it here, no player page, no ads', 3000);
-          await playChannel({ name: g.name, url: h.m3u8, referer: h.referer }, false, keys);
-          return;
+          // A harvested manifest that will not start must not cost the game: fall
+          // through to the site's player page instead of dying on the spinner.
+          try {
+            await playChannel({ name: g.name, url: h.m3u8, referer: h.referer }, false, keys);
+            return;
+          } catch(e){
+            toast('that feed would not start - falling back to the player page', 3600);
+            document.body.classList.remove('iframeMode');
+          }
         }
         if (h && h.drm && !keys)
           toast('this mirror is Widevine with no published key - using the player page', 3200);
@@ -1394,11 +1408,18 @@ async function watchGame(g, useFrame){
           }
           toast('direct feed resolved - playing in-app', 3000);
           // shaka handles the clearkey-encrypted HLS the way the provider's own
-          // player does; it reads the relay, so nothing is cross-origin
-          await playChannel({ name: g.name, url: h.m3u8, referer: h.referer },
-                            false, h.keys, true,
-                            !!(h.keys && typeof shaka !== 'undefined'));
-          return;
+          // player does; it reads the relay, so nothing is cross-origin.
+          // If that feed will not start, the player page is still one tap away --
+          // do not leave the viewer on a spinner.
+          try {
+            await playChannel({ name: g.name, url: h.m3u8, referer: h.referer },
+                              false, h.keys, true,
+                              !!(h.keys && typeof shaka !== 'undefined'));
+            return;
+          } catch(e){
+            toast('that feed would not start - falling back to the player page', 3600);
+            document.body.classList.remove('iframeMode');
+          }
       }
       // Nothing resolved. Do NOT dump the user into the ad-filled site: offer
       // the two honest choices and stay on our own page.
