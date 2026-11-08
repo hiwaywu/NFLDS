@@ -471,7 +471,9 @@ async function playChannel(c, byMirror, keys, fromGame, useShaka){
   // what is on screen now: a mirror that refuses to start must not take the
   // title (or the failover position) from the stream that is still playing
   const prev = { ch: lastChannel, idx: mirrorIdx, title: $('#nowTitle').textContent };
-  gameNow = fromGame ? (pol.game || gameNow) : null;
+  // watchGame sets gameNow to the game it is starting; pol.game can still name
+  // the previous one (the player-page path), so it is only the fallback
+  gameNow = fromGame ? (gameNow || pol.game) : null;
   lastChannel = c;
   const idx = channels.findIndex(x => x.url === c.url);
   if (!byMirror) { mirrorTried.clear(); mirrorReason = ''; }
@@ -520,6 +522,11 @@ async function playChannel(c, byMirror, keys, fromGame, useShaka){
       if (byMirror) mirrorTried.add(c.url);
       lastChannel = prev.ch; mirrorIdx = prev.idx; $('#nowTitle').textContent = prev.title;
     }
+    // A game feed that will not start belongs to watchGame: it falls back to the
+    // site's player page (PC) or offers retry / player page (phone). Swallowing
+    // the error here made that fallback unreachable -- the screen went back to
+    // "pick something below" with a toast, or hopped into the NFL TV list.
+    if (fromGame) throw e;
     // a dead mirror is also a reason to move on, not just to sit there
     if (!byMirror) return mirrorFail('could not start: ' + e.message);
   }
@@ -1038,6 +1045,19 @@ async function hubFetch(u, referer){
   return r.text();
 }
 
+// The provider's own player appends sessionId=<guid> to *its* manifest family
+// (the Akamai "GP" feeds answer 400 without it). Same two rules as hub.py
+// _session_id and LocalHub.followChain: only that family, and the right
+// separator. "&sessionId=" on a URL with no query string turns the path into
+// "index.m3u8&sessionId=..." and the CDN answers 404 -- the phone app's game
+// links died exactly that way, because only the hub copies had been fixed.
+function withSession(u){
+  if (/sessionid=/i.test(u) || !/akamaized|\/gp\/|lpnfl/i.test(u)) return u;
+  const guid = [8,4,4,4,12].map(n => Array.from({length: n}, () =>
+      '0123456789abcdef'[Math.floor(Math.random()*16)]).join('')).join('-');
+  return u + (u.indexOf('?') >= 0 ? '&' : '?') + 'sessionId=' + guid;
+}
+
 function keysFrom(text){
   const m = RX_MASTERINF.exec(text);
   if (!m) return null;
@@ -1129,14 +1149,7 @@ async function harvestChain(g, linksOverride){
       if (k) keys = k;
       const found = directIn(text);
       if (found){
-        let streamUrl = joinUrl(u, found);
-        // the provider's own player appends &sessionId=<guid> to this manifest
-        // family; without it the Akamai edge answers 400
-        if (!/sessionId=/i.test(streamUrl)){
-          streamUrl += '&sessionId=' + ([8,4,4,4,12]
-              .map(n => Array.from({length: n}, () =>
-                '0123456789abcdef'[Math.floor(Math.random()*16)]).join('')).join('-'));
-        }
+        const streamUrl = withSession(joinUrl(u, found));
         // the hub needs the clear-key pair itself: the license endpoint reads
         // it back out when hls.js runs the EME decrypt
         if (keys){
@@ -1341,13 +1354,14 @@ async function watchGame(g, useFrame){
         if (h && h.ok && h.m3u8 && (!h.drm || keys)){
           if (hls){ try { hls.destroy(); } catch(e){} hls = null; }
           lastChannel = null;
+          gameNow = g;      // a dead game feed hops this game's links, never NFL TV
           document.body.classList.remove('iframeMode');
           toast(keys ? 'harvested the feed and its published key - playing here'
                      : 'harvested the feed - playing it here, no player page, no ads', 3000);
           // A harvested manifest that will not start must not cost the game: fall
           // through to the site's player page instead of dying on the spinner.
           try {
-            await playChannel({ name: g.name, url: h.m3u8, referer: h.referer }, false, keys);
+            await playChannel({ name: g.name, url: h.m3u8, referer: h.referer }, false, keys, true);
             return;
           } catch(e){
             toast('that feed would not start - falling back to the player page', 3600);
