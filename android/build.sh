@@ -11,8 +11,8 @@ bt="${BUILD_TOOLS:-$sdk/build-tools/36.0.0}"
 [ -d "$bt" ] || bt="$(ls -d "$sdk"/build-tools/* 2>/dev/null | sort -V | tail -1)"
 jar="${ANDROID_JAR:-$sdk/platforms/android-35/android.jar}"
 out="$here/build"
-ver_code=6
-ver_name=2.6
+ver_code=1          # same as build.ps1 and the manifest: a higher code here
+ver_name=1.0        # would make every build.ps1 APK a refused "downgrade"
 
 for f in "$bt/aapt2" "$bt/d8" "$bt/zipalign" "$bt/apksigner" "$jar"; do
   [ -e "$f" ] || { echo "missing: $f" >&2; exit 1; }
