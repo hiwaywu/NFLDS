@@ -735,11 +735,26 @@ def _frame_score(u):
 
 
 def _session_id(url):
-    """The provider's own player appends &sessionId=<guid>; the Akamai edge 400s without it."""
-    if "sessionid=" in url.lower():
+    """The provider's own player appends sessionId=<guid> to *its* manifest family.
+
+    Two rules, both learned the hard way: only that family (the Akamai "GP" feeds
+    answer 400 without it, everything else ignores or breaks on an unknown param),
+    and a correct separator -- `&sessionId=` on a URL with no query string turns the
+    path into `index.m3u8&sessionId=...` and the CDN answers 404, which reads exactly
+    like "the chain found nothing".
+    """
+    if "sessionid=" in url.lower() or not _wants_session(url):
+        return url
+    low = url.lower()
+    if not ("akamaized" in low or "/gp/" in low or "lpnfl" in low):
         return url
     sep = "&" if "?" in url else "?"
     return url + sep + "sessionId=" + str(uuid.uuid4())
+
+
+def _wants_session(url):
+    low = (url or "").lower()
+    return "akamaized" in low or "/gp/" in low or "lpnfl" in low
 
 
 def b64url_hex(hexstr):

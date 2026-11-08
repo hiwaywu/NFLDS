@@ -1731,6 +1731,14 @@ async function boot(){
     const i = parseInt(qp.get('chan'), 10);
     if (!isNaN(i) && channels[i]) playChannel(channels[i]);
   }
+  // deep link: /?game=<event page> runs the real game path on that page -- the
+  // harvest walk, the relay, the picture. It exists so the app can be pointed at a
+  // fixture chain without going through the schedule.
+  if (qp.has('game')){
+    const gu = qp.get('game');
+    if (/^https?:\/\//i.test(gu || ''))
+      watchGame({ name: 'deep link game', url: gu, state: 'in', time: 'now' });
+  }
   if (IN_APP && window.Hub && Hub.hubReady) Hub.hubReady();
 }
 

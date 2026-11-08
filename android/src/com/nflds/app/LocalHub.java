@@ -723,8 +723,13 @@ final class LocalHub {
         return null;
     }
 
-    private static final String[] CHATTY = {"chat", "discord", "telegram", "t.me/",
-            "whatsapp", "instagram", "tiktok", "facebook.com", "twitter.com", "x.com/",
+    /** Does this manifest family want sessionId=<guid> appended? */
+    private static boolean wantsSession(String url) {
+        String low = url == null ? "" : url.toLowerCase(Locale.US);
+        return low.contains("akamaized") || low.contains("/gp/") || low.contains("lpnfl");
+    }
+
+    private static final String[] CHATTY = {"chat", "discord", "telegram", "t.me/",            "whatsapp", "instagram", "tiktok", "facebook.com", "twitter.com", "x.com/",
             "youtube.com", "disqus", "livechat", "21aims"};
 
     /**
@@ -833,11 +838,15 @@ final class LocalHub {
             String found = directStreamIn(text);
             if (found != null) {
                 found = Http.join(resp.finalUrl, found);
-                // the provider's own player appends &sessionId=<guid> to this
-                // manifest family; without one the Akamai edge answers 400
-                // ("GP" entitlement feeds gate on the presence of the param)
-                if (!found.toLowerCase().contains("sessionid=")) {
-                    found = found + "&sessionId=" + java.util.UUID.randomUUID();
+                // The provider's own player appends sessionId=<guid> to *this* family
+                // of manifests (the Akamai "GP" entitlement feeds answer 400 without
+                // it). Two rules matter: only that family, and a correct separator --
+                // appending "&sessionId=" to a URL with no query string turns the path
+                // into "index.m3u8&sessionId=..." and the CDN answers 404, which looked
+                // exactly like "the chain found nothing".
+                if (!found.toLowerCase(Locale.US).contains("sessionid=") && wantsSession(found)) {
+                    found = found + (found.indexOf('?') >= 0 ? "&" : "?")
+                            + "sessionId=" + java.util.UUID.randomUUID();
                 }
                 if (keys != null) lastClearKeys = keys;
                 try {
@@ -912,6 +921,16 @@ final class LocalHub {
             n.start();
             relay = n;
             relayLow = low;
+            // one line the harness (and a bug report) can grep: which feed, which
+            // referer, what the ladder resolved to
+            String res = "";
+            try {
+                JSONObject st = n.stats();
+                JSONObject v = st.optJSONObject("variant");
+                if (v != null) res = v.optInt("w") + "x" + v.optInt("h");
+            } catch (Exception ignored) { }
+            Log.i(TAG, "relay started: " + url + "  ref=" + (ref == null ? "" : ref)
+                    + "  " + res);
             // the picture's sound may live in its own playlist: relay that too,
             // under /relay/a/ so its segments cannot collide with the video's
             Relay oldAudio = relayAudio;
