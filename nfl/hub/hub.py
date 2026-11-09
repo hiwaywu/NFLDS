@@ -15,6 +15,7 @@ Sections in the UI:
 """
 import argparse
 import collections
+import hashlib
 import json
 import os
 import re
@@ -42,7 +43,7 @@ LOG_PATH = os.path.join(ROOT, "hub.err.log")
 # bound to 0.0.0.0 (the phone case) the relay has to listen on the LAN too, or
 # the phone is handed http://127.0.0.1:89xx/ and talks to itself.
 RELAY_HOST = "127.0.0.1"
-HUB_VERSION = "1.0"
+HUB_VERSION = "1.3"
 
 
 def log_exc(where, exc):
@@ -680,6 +681,155 @@ def _manifest_in(text):
     return m.group(1) if m else None
 
 
+# ------------------------------------------------------------ inline playlists
+# One player family never asks for an .m3u8 at all. Its page ships every rendition
+# *inside itself*: `masterinf` holds the variant INF lines and `payload.renditions`
+# holds complete media playlists whose segment URLs are absolute and signed, and
+# the site's own shaka player is fed from those strings. Three consequences, and
+# each one broke the walk on its own:
+#
+#   * a network sniffer has no playlist request to catch (shaka reads a blob),
+#   * `globalurl` is a dud ("chargers.m3u8" -> 404 on the page's own directory),
+#   * the page is served as an empty ~18 KB shell to a non-browser hit or on a
+#     cold request, and answers with the full ~85 KB payload a moment later.
+#
+# So the resolver does what the site's player does: read the payload, and serve a
+# real master + variant pair from the hub. Every playlist request re-reads the page
+# (3 s cache) so the live window keeps moving; the relay proxies the segments with
+# the player page as Referer, which is what they are signed for.
+RX_MASTERINF = re.compile(r"masterinf\s*=\s*\{")
+RX_PAYLOADV = re.compile(r"payload\s*=\s*\{")
+INLINE = {}          # id -> {"page": url, "referer": url, "at": ts}
+INLINE_CACHE = {}    # id -> (ts, [variant dicts])
+INLINE_TTL = 3.0
+
+
+def _json_after(text, rx):
+    """The JSON object assigned at `rx` in a page (brace-matched, string-aware).
+
+    A regex cannot do this: the payload is ~85 KB of nested JSON whose strings
+    contain newlines escaped as \\n, so every non-greedy pattern either stops at
+    the first brace or eats the rest of the document.
+    """
+    m = rx.search(text or "")
+    if not m:
+        return None
+    start = m.end() - 1
+    depth, instr, esc = 0, False, False
+    for j in range(start, min(len(text), start + 4_000_000)):
+        ch = text[j]
+        if instr:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                instr = False
+        else:
+            if ch == '"':
+                instr = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:j + 1])
+                    except Exception:
+                        return None
+    return None
+
+
+def inline_from(html):
+    """Variants the page carries inline, best bandwidth first, or None."""
+    master = _json_after(html, RX_MASTERINF)
+    payload = _json_after(html, RX_PAYLOADV)
+    if not isinstance(master, dict) or not isinstance(payload, dict):
+        return None
+    rend = payload.get("renditions") or {}
+    if not isinstance(rend, dict) or not rend:
+        return None
+    out = []
+    for name, meta in master.items():
+        key = name[:-5] if name.lower().endswith(".m3u8") else name
+        text = rend.get(key) or rend.get(name)
+        if not isinstance(text, str) or "#EXTM3U" not in text:
+            continue
+        inf = (meta or {}).get("inf") if isinstance(meta, dict) else ""
+        bw = 0
+        mb = re.search(r"BANDWIDTH=(\d+)", inf or "")
+        if mb:
+            bw = int(mb.group(1))
+        out.append({"file": name if name.lower().endswith(".m3u8") else key + ".m3u8",
+                    "inf": inf or "", "bw": bw, "playlist": text})
+    out.sort(key=lambda v: -v["bw"])
+    return out or None
+
+
+def inline_register(page, referer):
+    """Remember a page that carries its playlists and answer with its hub URL."""
+    sid = hashlib.sha1(("%s|%s" % (page, referer or "")).encode("utf-8")).hexdigest()[:16]
+    INLINE[sid] = {"page": page, "referer": referer or page, "at": time.time()}
+    return sid
+
+
+def inline_variants(sid):
+    """Fresh variants for one registered page, retried: the shell answer is normal."""
+    src = INLINE.get(sid)
+    if not src:
+        return None
+    hit = INLINE_CACHE.get(sid)
+    if hit and time.time() - hit[0] < INLINE_TTL:
+        return hit[1]
+    for attempt in range(3):
+        try:
+            raw = fetch(src["page"], timeout=20,
+                        headers={"Referer": src["referer"]}).read().decode("utf-8", "replace")
+        except Exception:
+            raw = ""
+        vs = inline_from(raw)
+        if vs:
+            INLINE_CACHE[sid] = (time.time(), vs)
+            return vs
+        if attempt < 2:
+            time.sleep(0.5)
+    return None
+
+
+def inline_master(sid):
+    vs = inline_variants(sid)
+    if not vs:
+        return None
+    out = ["#EXTM3U", "#EXT-X-VERSION:6", "#EXT-X-INDEPENDENT-SEGMENTS"]
+    for v in vs:
+        out.append(v["inf"] or "#EXT-X-STREAM-INF:BANDWIDTH=%d" % v["bw"])
+        out.append(v["file"])
+    return "\n".join(out) + "\n"
+
+
+def inline_media(sid, name):
+    for v in (inline_variants(sid) or []):
+        if v["file"] == name:
+            return v["playlist"]
+    return None
+
+
+def _is_playlist(url, referer):
+    """A name the page invented is not a stream: fetch it and look at the bytes.
+
+    `globalurl = 'chargers.m3u8'` joins to a path that answers 404 on the same
+    host -- and the walk used to stop there, report ok:true and hand the player a
+    URL that could never start, which is how a live game ended up "falling back
+    to the player page".
+    """
+    try:
+        r = fetch(url, timeout=8, headers={"Referer": referer} if referer else None)
+        head = r.read(400).decode("utf-8", "replace").lstrip()
+        return r.status == 200 and head.startswith("#EXTM3U")
+    except Exception:
+        return False
+
+
 def _next_hop(text):
     """The next player URL a wrapper hands the picture to -- the *best* one.
 
@@ -764,7 +914,7 @@ def b64url_hex(hexstr):
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-def harvest_http(page):
+def harvest_http(page, base=""):
     """Walk the chain with plain GETs. Returns the /api/harvest payload."""
     if not page:
         return {"ok": False, "error": "missing u"}
@@ -777,6 +927,14 @@ def harvest_http(page):
             hit["page"] = page
             hit["tried"] = tried
             hit["http"] = True
+            # an inline page has no manifest URL of its own: the hub serves the
+            # master for it, and every request for that master re-reads the page
+            if hit.get("inline_page"):
+                sid = inline_register(hit.pop("inline_page"), hit.get("inline_ref") or page)
+                hit.pop("inline_ref", None)
+                hit["m3u8"] = "%s/inline/%s/index.m3u8" % (base or "http://127.0.0.1:8795", sid)
+                hit["inline"] = True
+                hit["via"] = _host(hit["m3u8"])
             return hit
         if hit:
             traces.append(hit)
@@ -804,17 +962,26 @@ def _follow_chain(first, event_page):
             trace.append(reason)
             return {"ok": False, "error": reason, "trace": trace}
         keys = _keys_in(raw) or keys
+        # a page that carries its playlists inline is the end of the walk: there
+        # is no URL to follow, and its own `globalurl` is a relative dud
+        if inline_from(raw):
+            return {"ok": True, "inline_page": final, "inline_ref": final,
+                    "keys": dict(keys or {}), "hops": len(seen), "referer": final,
+                    "trace": trace}
         found = _manifest_in(raw)
         if found:
-            found = urllib.parse.urljoin(final, found)
-            found = _session_id(found)
-            if keys:
-                HARVEST_KEYS.clear()
-                HARVEST_KEYS.update(keys)
-            return {"ok": True, "m3u8": found, "via": _host(found),
-                    "hops": len(seen), "referer": final,
-                    "keys": dict(keys or {})}
-        trace.append("hop %d: %s (%d bytes), no stream named" % (hop, _host(cur), len(raw)))
+            cand = _session_id(urllib.parse.urljoin(final, found))
+            if _is_playlist(cand, final):
+                if keys:
+                    HARVEST_KEYS.clear()
+                    HARVEST_KEYS.update(keys)
+                return {"ok": True, "m3u8": cand, "via": _host(cand),
+                        "hops": len(seen), "referer": final,
+                        "keys": dict(keys or {}), "trace": trace}
+            trace.append("hop %d: %s named %s -- not a playlist" %
+                         (hop, _host(cur), (found or "")[:90]))
+        else:
+            trace.append("hop %d: %s (%d bytes), no stream named" % (hop, _host(cur), len(raw)))
         nxt = _next_hop(raw)
         if not nxt:
             reason = "hop %d (%s) names no iframe and no stream" % (hop, _host(cur))
@@ -823,14 +990,14 @@ def _follow_chain(first, event_page):
     return {"ok": False, "error": reason, "trace": trace}
 
 
-def harvest_payload(page, fresh=False):
+def harvest_payload(page, fresh=False, base=""):
     """The best answer for /api/harvest: the GET walk first, Playwright second."""
     hit = HARVEST_CACHE.get(page)
     if hit and not fresh and time.time() - hit[0] < HARVEST_TTL:
         return hit[1]
     payload = None
     try:
-        payload = harvest_http(page)
+        payload = harvest_http(page, base)
     except Exception as exc:
         payload = {"ok": False, "error": str(exc)[:200], "http": True}
     if not payload.get("ok") and os.path.isfile(HARVEST):
@@ -1717,7 +1884,44 @@ class Handler(BaseHTTPRequestHandler):
             if not page:
                 return self._send(400, '{"ok":false,"error":"missing u"}')
             fresh = (qs.get("fresh") or ["0"])[0] == "1"
-            return self._send(200, json.dumps(harvest_payload(page, fresh)))
+            base = "http://%s:%d" % (request_hostname(self), self.server.server_port)
+            return self._send(200, json.dumps(harvest_payload(page, fresh, base)))
+
+        if u.path == "/api/inline" and self.command == "POST":
+            # A page that carries its playlists inline has no manifest URL to hand
+            # back, so the page asks us to remember it and serves the pair itself.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n).decode("utf-8", "replace") or "{}")
+                page = str(body.get("page") or "")
+                ref = str(body.get("referer") or page)
+                if not page.startswith("http"):
+                    return self._send(400, '{"ok":false,"error":"missing page"}')
+                sid = inline_register(page, ref)
+                base = "http://%s:%d" % (request_hostname(self), self.server.server_port)
+                return self._send(200, json.dumps({
+                    "ok": True, "id": sid,
+                    "m3u8": "%s/inline/%s/index.m3u8" % (base, sid),
+                    "referer": page}))
+            except Exception as exc:
+                return self._send(200, json.dumps({"ok": False, "error": str(exc)[:160]}))
+
+        if u.path.startswith("/inline/"):
+            parts = [p for p in u.path.split("/") if p]
+            if len(parts) < 3:
+                return self._send(404, "")
+            sid, name = parts[1], parts[2]
+            text = None
+            try:
+                if name in ("index.m3u8", "master.m3u8"):
+                    text = inline_master(sid)
+                else:
+                    text = inline_media(sid, name)
+            except Exception as exc:
+                log_exc("inline " + u.path, exc)
+            if not text:
+                return self._send(503, "#EXTM3U\n")
+            return self._send(200, text, "application/vnd.apple.mpegurl")
 
         if u.path == "/api/clearkey":
             # What hls.js asks when a harvested feed is SAMPLE-AES with a key the

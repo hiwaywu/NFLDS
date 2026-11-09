@@ -1068,6 +1068,70 @@ function keysFrom(text){
   return Object.keys(out).length ? out : null;
 }
 
+// ---------------------------------------------------------- inline playlists
+// One player family never asks for an .m3u8 at all: its page carries every
+// rendition inside itself (`masterinf` = the variant INF lines, `payload.renditions`
+// = complete media playlists with absolute signed segment URLs) and its own shaka
+// player is fed from those strings. So there is no playlist request for the app's
+// sniffer to catch, `globalurl` is a name that 404s on the page's own directory,
+// and the page answers a cold hit with an empty ~18 KB shell before it answers with
+// the payload. The hub serves the pair for such a page (see /api/inline), and the
+// relay proxies its segments -- so the picture still plays in our own <video>.
+function jsonAfter(text, rx){
+  const m = rx.exec(text || '');
+  if (!m) return null;
+  let i = m.index + m[0].length - 1, depth = 0, instr = false, esc = false;
+  for (let j = i; j < text.length; j++){
+    const ch = text[j];
+    if (instr){
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') instr = false;
+    } else {
+      if (ch === '"') instr = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}'){
+        depth--;
+        if (!depth){
+          try { return JSON.parse(text.slice(i, j + 1)); } catch(e){ return null; }
+        }
+      }
+    }
+  }
+  return null;
+}
+function inlineIn(text){
+  const master = jsonAfter(text, /masterinf\s*=\s*\{/);
+  const payload = jsonAfter(text, /payload\s*=\s*\{/);
+  if (!master || !payload || !payload.renditions) return null;
+  const files = Object.keys(master).filter(k => {
+    const key = /\.m3u8$/i.test(k) ? k.slice(0, -5) : k;
+    const pl = payload.renditions[key] || payload.renditions[k];
+    return typeof pl === 'string' && pl.indexOf('#EXTM3U') >= 0;
+  });
+  return files.length ? { files: files, name: payload.name || '' } : null;
+}
+async function registerInline(page, referer){
+  try {
+    const j = await fetch('/api/inline', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page: page, referer: referer || page }) }).then(r => r.json());
+    if (j && j.ok && j.m3u8)
+      return { ok: true, m3u8: j.m3u8, referer: page, keys: null, inline: true,
+               via: 'inline', id: j.id };
+  } catch(e){}
+  return null;
+}
+// A name a page invented is not a stream: fetch it and look at the first bytes.
+// "globalurl = 'chargers.m3u8'" joins to a path that answers 404 on the page's own
+// host, and accepting it is how a live game "resolved" and then could not start.
+async function isPlaylist(u, referer){
+  try {
+    const t = await hubFetch(u, referer);
+    return typeof t === 'string' && t.replace(/^\uFEFF/, '').trim().slice(0, 8).toUpperCase().indexOf('#EXTM3U') === 0;
+  } catch(e){ return false; }
+}
+
 /** next wrapper URL a page hands the picture to, or a manifest it names */
 function directIn(text){
   let m = RX_GLOBALURL.exec(text);
@@ -1144,12 +1208,29 @@ async function harvestChain(g, linksOverride){
       let text = '';
       try { text = await hubFetch(u, referer); }
       catch(e){ report.tried.push('hop ' + hop + ' (' + hostOf2(u) + ') failed: ' + e.message); break; }
+      // a page that carries its playlists inline answers a cold hit with the
+      // shell first: same URL, no payload. Ask again before walking past it.
+      for (let again = 0; again < 2 && !inlineIn(text); again++){
+        await new Promise(r => setTimeout(r, 500));
+        try {
+          const t2 = await hubFetch(u, referer);
+          if (inlineIn(t2)) { text = t2; break; }
+          if (t2 && t2.length > text.length) text = t2;
+        } catch(e){ break; }
+      }
       docs.push(u);
       const k = keysFrom(text);
       if (k) keys = k;
+      if (inlineIn(text)){
+        const reg = await registerInline(u, referer);
+        if (reg){
+          report.tried.push('hop ' + hop + ' (' + hostOf2(u) + ') carries its playlists inline');
+          return reg;
+        }
+      }
       const found = directIn(text);
       if (found){
-        const streamUrl = withSession(joinUrl(u, found));
+        const cand = withSession(joinUrl(u, found));
         // the hub needs the clear-key pair itself: the license endpoint reads
         // it back out when hls.js runs the EME decrypt
         if (keys){
@@ -1159,10 +1240,22 @@ async function harvestChain(g, linksOverride){
               body: JSON.stringify(Object.keys(keys).map(kid => ({ kid: kid, key: keys[kid] }))) });
           } catch(e){}
         }
-        return {
-          ok: true, m3u8: streamUrl,
-          via: hostOf2(found), referer: u, keys: keys, hops: docs
-        };
+        if (await isPlaylist(cand, u)){
+          return {
+            ok: true, m3u8: cand,
+            via: hostOf2(found), referer: u, keys: keys, hops: docs
+          };
+        }
+        report.tried.push('hop ' + hop + ' (' + hostOf2(u) + ') named ' + String(found).slice(0, 60)
+                          + ' -- not a playlist');
+        // a dud name is not the end of the walk: the page may still hand its
+        // picture to a frame one hop further in
+        const alt = nextHopIn(text);
+        if (!alt) break;
+        referer = u;
+        u = joinUrl(u, alt);
+        if (adish(u)) break;
+        continue;
       }
       const nxt = nextHopIn(text);
       if (!nxt){
@@ -1186,7 +1279,17 @@ function sniffStream(u, referer){
       if (done) return;
       done = true;
       try { delete window.__nbaSniff; } catch(e){ window.__nbaSniff = null; }
-      if (!j || !j.m3u8){ resolve(null); return; }
+      if (!j || !j.m3u8){
+        // the engine also hands back the rendered page: a page that carries its
+        // playlists inline hands over nothing a request sniffer can see, because
+        // its own player never asks for a playlist URL
+        if (j && j.html && inlineIn(j.html)){
+          registerInline(j.referer || u, j.referer || u).then(function(r){ resolve(r); });
+          return;
+        }
+        resolve(null);
+        return;
+      }
       const keys = j.html ? keysFrom(j.html) : null;
       if (keys){
         fetch('/api/keys', { method: 'POST',

@@ -86,7 +86,64 @@ The candidate list came from the public `iptv-org` index (`channels.json` + `str
 to ids containing `nfl` and then tested one by one — the index lists 31 NFL-named channels and only
 3 had a live, playable URL. RedZone and Sunday Ticket are in the index but were **not** live.
 
-### 2.4 Everything from the NBA app that carried over unchanged
+### 2.4 The inline-playlist family (2026-11-08, live NFL Sunday)
+
+The NBA port learned the chain `event → /main/N → embed → manifest`. On the NFL slate one family
+does not work that way at all, and every assumption above breaks on it at once:
+
+```text
+foxiy.st/event/.../main/1
+  <iframe id="streamIframe" src="https://trendy48.site/embed/3zw64nbs-8718">
+    -> trendy48.site/top/chargers
+       -> topstreamer.site/iframe/nfl/chargers       <- the player, no manifest anywhere
+```
+
+What that last page serves (85 KB, only to a browser-ish request):
+
+```js
+var key = 'chargers';
+var globalurl = 'chargers.m3u8';                       // a dud: 404 on its own host
+var masterinf = {"video5_chargers.m3u8": {"inf": "#EXT-X-STREAM-INF:BANDWIDTH=10000000,
+                 RESOLUTION=1920x1080,..."}, ...};     // the ladder
+var payload = {"name": "chargers", "renditions": {
+                 "video5_chargers": "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:2230\n...
+                 https://o300801.mp.lura.live/live/ephemeral/.../segment_...c.ts?Expires=...&Signature=..."}};
+```
+
+- **No playlist request exists.** The site's own shaka player is fed a `blob:` built from those
+  strings, so the app's invisible-engine sniffer — which waits for a `.m3u8` on the wire — caught
+  nothing, on any of three candidate pages (`sniffStream` → `null` after ~6 s each).
+- **`globalurl` is a name, not a URL.** It joined to `.../iframe/nfl/chargers.m3u8`, the relay asked
+  for it, got 404, and the page fell through to "that feed would not start — falling back to the
+  player page". That was the reported symptom: the app left its own player.
+- **The page is flaky cold.** The same URL answers ~18 KB with no `payload` and ~85 KB with the whole
+  ladder a second later, so a single fetch is a coin toss.
+
+The fix is three small pieces, in the shape of the provider's own player:
+
+| Piece | Where | What it does |
+|---|---|---|
+| `inline_from(html)` / `inlineIn(text)` | `hub.py`, `index.html`, `LocalHub.java` | brace-matched, string-aware JSON extraction of `masterinf` + `payload.renditions`; ranks by `BANDWIDTH` |
+| `/api/inline` + `/inline/<id>/{index,videoN_*}.m3u8` | all three | remembers the page and *is* the playlist: a master with real `#EXT-X-STREAM-INF` lines plus one media playlist per rung, re-read from the page per request (3 s cache, 3 tries for the shell) |
+| `isPlaylist(url)` | all three | a name a page invented must answer `#EXTM3U` before the walk believes it; a dud is a trace line, and the walk continues to the next frame instead of stopping |
+
+The relay needed no change: variant URIs are relative to the master it fetched, and the segment URIs
+inside the media playlist are absolute, so `urllib.parse.urljoin` keeps them and the relay proxies
+them with the player page as `Referer` — which is what the CDN signatures are for.
+
+Measured on a live game (Texans @ Chargers, 2026-11-08):
+
+```text
+PC    --app window : 1920x1080, ADVANCE 6.00s/6s, audio 171815 bytes, blob:http://127.0.0.1:8801
+phone (Pixel 7)    : 1920x1080, ADVANCE 6.00s/6s, audio +94775 in 6s, relay variant
+                     http://127.0.0.1:8795/inline/ad739aa4a3617e31/video5_chargers.m3u8 @ 10 Mbps
+```
+
+Offline proof, no network and no browser: `python tools/verify_inline_family.py` → 13/13 (ladder
+found and ranked, master/variant pair answer, the dud `globalurl` rejected, the 18 KB shell not
+mistaken for a ladder).
+
+### 2.5 Everything from the NBA app that carried over unchanged
 
 - the licence POST proxy (`do_POST` on `/ext`), the `Referer`/`Origin` rewrite, frame rehosting,
   the popup gate and the "a tap is not a licence to leave" navigation rule;
@@ -100,26 +157,31 @@ to ids containing `nfl` and then tested one by one — the index lists 31 NFL-na
 Both harnesses are the NBA ones with the paths/package renamed; the fixture is sport-agnostic.
 
 ```text
-python tools/verify_inapp_game.py       29/29   PC, real --app Chrome window over CDP
-python tools/verify_android_inapp.py    14/14   Pixel 7 / Android 15 emulator, releases/NFLHub.apk
+python tools/fixture_stream.py          the offline mirror: XFO, referer gate, licence POST, frames
+python tools/verify_inline_family.py   13/13   inline ladder, master/variant pair, dud name, shell
+python tools/verify_inapp_game.py      29/29   PC, real --app Chrome window over CDP
+python tools/verify_android_inapp.py   14/14   Pixel 7 / Android 15 emulator, releases/NFLHub.apk
+python tools/live_probe.py             one live game: advance, audio bytes, source, relay stats
 ```
 
 Live checks on this build:
 
 ```text
-GET /api/ping      -> {"ok":true,"app":"nflhub","version":"1.0","lan":"http://127.0.0.1:8795/"}
-GET /api/games?date=2026-11-08 -> 13 NFL games from ESPN, both football sources ok (25 events each)
-GET /api/harvest?u=<live college event> -> ok:false with a per-hop trace naming the chat frame it
-                                           refused, i.e. the ranking doing its job
+GET /api/ping      -> {"ok":true,"app":"nflhub","version":"1.3","lan":"http://127.0.0.1:8795/"}
+GET /api/games?date=2026-11-08 -> 13 NFL games from ESPN, 4 in progress, each with a stream listed
+GET /api/harvest?u=<live event> -> ok:true, 1920x1080 manifest, drm:false
+POST /api/inline {page, referer} -> {"ok":true,"id":"ad739…","m3u8":"http://127.0.0.1:8801/inline/ad739…/index.m3u8"}
+GET /inline/<id>/index.m3u8    -> 200 master, 1080p rung first
+GET /inline/<id>/video5_….m3u8 -> 200 media playlist, absolute signed luma.live segments
 ```
 
 ## 4. Known gaps
 
-- **No live NFL game has been harvested yet** in this build: the mirror's football section was
-  college on the day it was written. The chain, the ranking, the relay and both shells are proven
-  against the fixture and against a live college-football chain (`foxiy.st` -> `trendy48.site`), but
-  the first NFL Sunday is the real test. When it fails, `/api/harvest` returns `chains[]` with a
-  trace per hop — read the last line, it names the host and the reason.
+- **The mirrors are the only real dependency.** On 2026-11-08 the plain-GET walk still hit
+  `trendy48.site` → 403 (Cloudflare JA3, §3.5 of the NBA SOP) on the PC, so the PC used Playwright;
+  the phone reached the same pages through the WebView bridge, which is why the inline family is
+  resolvable there without a browser. A mirror family that hides both the playlist *and* its page
+  from a plain fetch would need the engine again.
 - The `bundled` channel list can outlive a provider's id. `feeds.txt` is refreshed from `main`, so
   fixing it means editing that file, not shipping an APK.
 - `NFLHub.exe` is 45 KB (the NBA one was 25 KB) because the icon carries seven sizes.

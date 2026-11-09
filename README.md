@@ -63,13 +63,23 @@ adb shell am start -n com.nflds.app/.MainActivity --es url https://host/main/1  
    `"value"`, or a hard-coded `.m3u8`/`.mpd`).
    Football pages put their **chat widget in the first iframe**, so frames are *scored* before they
    are followed (player-ish first, chat/social last, ad hosts never) — otherwise the walk reports
-   "no stream" while the player sits one frame over.
+   "no stream" while the player sits one frame over. A manifest a page *names* is fetched before it
+   is believed: `globalurl = 'chargers.m3u8'` joins to a 404 on the page's own host, and accepting it
+   is how a live game "resolved" and then could not start.
 3. **The picture** is our own `<video>` fed by the local relay (`/api/play` → 8960-9019), which pulls
    the feed with the `Referer`/`Origin` its CDN expects (`&r=<player page>`). A feed that is
    Widevine-packaged but ships its clear key in the open (`masterinf = {"kid": "key"}`) plays through
    `org.w3.clearkey` + `/api/clearkey` (JWK set) with no licence server; a real Widevine feed falls
    back to the site's own player page proxied through `/play`, with its licence POST forwarded.
-4. **The fallback** — when the chain yields nothing — is the site's own player page, served by the
+4. **The inline family** hands out no manifest URL at all: the player page carries the whole ladder
+   inside itself (`masterinf` = the variant `#EXT-X-STREAM-INF` lines, `payload.renditions` = complete
+   media playlists whose segment URLs are absolute and signed) and its own shaka player is fed from
+   those strings. There is no playlist request to sniff, and a cold hit gets an ~18 KB shell before
+   the ~85 KB payload, so the hub re-reads the page and *is* the playlist: `/api/inline` remembers it,
+   `/inline/<id>/index.m3u8` answers a real master, `/inline/<id>/video5_….m3u8` the rendition — the
+   relay proxies the segments with the player page as `Referer`. Measured on a live Sunday game:
+   1920x1080, audio at ~16 KB/s, in the app, no browser, no player page.
+5. **The fallback** — when the chain yields nothing — is the site's own player page, served by the
    hub with the site's `Referer`/`Origin`, every nested frame rehosted, and `window.open()` turned
    into the picture in the same frame. That is the path that made games playable in-app at all.
 
@@ -125,6 +135,11 @@ start (and on `reload list`), so a dead mirror is fixed by editing that file on 
 - **The mirrors are the fragile dependency.** They post NFL games on the day (the football section
   shows college games on a Saturday), so before kick-off a Sunday slate lists every game with no
   stream yet — `has a feed (opens at kickoff)` means exactly that.
+- **The inline family pages answer a cold hit with a shell.** The first request to a
+  `.../iframe/...` player page can come back ~18 KB with no payload at all; the resolver asks again
+  (up to three times, 0.5 s apart) and only then gives up. A feed that rotates its signing after that
+  is served fresh on every playlist request, so the picture keeps moving while the page keeps
+  cooperating.
 - Nicknames are shared with college football (Falcons, Cardinals, Panthers...), so a match must hit
   **both** teams; the matcher requires both, and a one-sided hit is ignored.
 - Browsing the PC hub from another device needs ports `8795` and `8960-9019` reachable; a
@@ -135,15 +150,23 @@ start (and on `reload list`), so a dead mirror is fixed by editing that file on 
 The engine is proven offline with a fixture that reproduces every gate:
 
 ```text
-python tools/fixture_stream.py        # a mirror with XFO, a referer gate, a POST licence,
-                                      # a nested player, a frame-buster, window.open, an ad
-                                      # popup, an ad overlay and a wrapper chain
-python tools/verify_inapp_game.py     # 29 checks against the real --app window (CDP)
-python tools/verify_android_inapp.py  # 14 checks on a USB device or emulator, this APK
+python tools/fixture_stream.py         # a mirror with XFO, a referer gate, a POST licence,
+                                       # a nested player, a frame-buster, window.open, an ad
+                                       # popup, an ad overlay and a wrapper chain
+python tools/verify_inline_family.py   # 13 checks: the inline ladder, the master/variant pair,
+                                       # the dud globalurl and the ~18 KB shell
+python tools/verify_inapp_game.py      # 29 checks against the real --app window (CDP)
+python tools/verify_android_inapp.py   # 14 checks on a USB device or emulator, this APK
+python tools/live_probe.py             # what a live game actually does (advance, audio, source)
 ```
 
-Last measured: **29/29** on the PC window and **14/14** on a Pixel 7 / Android 15 emulator with the
-APK from `releases/`. `python tools/build_portable.py --zip` rebuilds the portable bundle.
+Last measured (2026-11-08, live NFL slate): **29/29** on the PC window and **14/14** on a Pixel 7 /
+Android 15 emulator with the APK from `releases/`; `tools/verify_inline_family.py` **13/13**. On the
+same slate, the inline family played **1920x1080 with audio in both places** —
+`tools/live_probe.py` reported `ADVANCE 6.00s over 6s`, `videoWidth 1920`, audio decoded at
+~16 KB/s, source `blob:http://127.0.0.1:…` (our own player, not a site page); on the phone the relay
+named `inline/…/video5_chargers.m3u8` at 10 Mbps. `python tools/build_portable.py --zip` rebuilds
+the portable bundle.
 
 ## Layout
 
@@ -151,8 +174,8 @@ APK from `releases/`. `python tools/build_portable.py --zip` rebuilds the portab
 nfl/            hub, relay, probes, CLI launchers, feeds.txt
   hub/          server, UI, hls.min.js, shaka.js, probes, NFLHUB.bat, FIREWALL.bat, NFLHub.exe
 pc/             NFLPC.cs (the launcher), build-pc.ps1, app.ico
-tools/          deploy.ps1, build_portable.py, fixture_stream.py, both verify harnesses
+tools/          deploy.ps1, build_portable.py, fixture_stream.py, live_probe.py, the harnesses
 android/        manifest, src/ (LocalHub, Relay, Games, Http, MainActivity), res/, build.ps1
-releases/       NFLHub.apk (385 KB, standalone), NFLHub-portable.zip
+releases/       NFLHub.apk (389 KB, standalone), NFLHub-portable.zip
 docs/           PROCESS.md (the port map), screenshots, helper scripts
 ```

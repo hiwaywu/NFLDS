@@ -53,7 +53,7 @@ import java.util.regex.Pattern;
 final class LocalHub {
 
     private static final String TAG = "nflhub.hub";
-    static final String VERSION = "1.0";
+    static final String VERSION = "1.3";
     private static final String FEEDS_REMOTE =
             "https://raw.githubusercontent.com/hiwaywu/NFLDS/main/nfl/feeds.txt";
 
@@ -524,6 +524,55 @@ final class LocalHub {
                     .put("probe", new JSONObject().put("ok", frame != null).put("note", "frame read from the page, not probed")));
             return;
         }
+        if (p.equals("/api/inline") && "POST".equals(r.method)) {
+            // a page that carries its playlists inline has no manifest URL to hand
+            // back, so the page asks us to remember it and we serve the pair
+            try {
+                String body = r.body == null ? "{}" : new String(r.body, "UTF-8");
+                JSONObject in = body.trim().startsWith("{") ? new JSONObject(body) : new JSONObject();
+                String page = in.optString("page", "");
+                String ref = in.optString("referer", page);
+                if (!page.startsWith("http")) {
+                    send(out, r, 400, "application/json",
+                         bytes("{\"ok\":false,\"error\":\"missing page\"}"), null);
+                    return;
+                }
+                String sid = inlineRegister(page, ref);
+                json(out, r, new JSONObject()
+                        .put("ok", true).put("id", sid)
+                        .put("m3u8", "http://127.0.0.1:" + server.getLocalPort()
+                                + "/inline/" + sid + "/index.m3u8")
+                        .put("referer", page));
+            } catch (Exception e) {
+                json(out, r, new JSONObject().put("ok", false)
+                        .put("error", String.valueOf(e.getMessage())));
+            }
+            return;
+        }
+        if (p.startsWith("/inline/")) {
+            String[] parts = p.split("/");
+            // ["", "inline", "<id>", "<file>"]
+            if (parts.length < 4) {
+                send(out, r, 404, "text/plain", new byte[0], null);
+                return;
+            }
+            String text = null;
+            try {
+                if ("index.m3u8".equals(parts[3]) || "master.m3u8".equals(parts[3])) {
+                    text = inlineMaster(parts[2]);
+                } else {
+                    text = inlineMedia(parts[2], parts[3]);
+                }
+            } catch (Exception e) {
+                Log.i(TAG, "inline " + p + ": " + e.getMessage());
+            }
+            if (text == null) {
+                send(out, r, 503, "application/vnd.apple.mpegurl", bytes("#EXTM3U\n"), null);
+                return;
+            }
+            send(out, r, 200, "application/vnd.apple.mpegurl", bytes(text), null);
+            return;
+        }
         if (p.equals("/api/harvest")) {
             JSONObject j;
             try {
@@ -729,6 +778,191 @@ final class LocalHub {
         return low.contains("akamaized") || low.contains("/gp/") || low.contains("lpnfl");
     }
 
+    // ------------------------------------------------------- inline playlists
+    /**
+     * One player family never asks for an .m3u8 at all: its page carries every
+     * rendition inside itself (`masterinf` = variant INF lines, `payload.renditions`
+     * = whole media playlists with absolute signed segment URLs) and its own shaka
+     * player is fed from those strings. Three things broke the walk on that page:
+     * a request sniffer sees no playlist request (shaka reads a blob), `globalurl`
+     * is a name that 404s on the page's own directory, and a cold hit gets an empty
+     * ~18 KB shell instead of the ~85 KB payload.
+     *
+     * So the hub does what the site's player does: read the payload and serve a real
+     * master + variant pair, re-reading the page (3 s cache) on every request so the
+     * live window keeps moving. The relay proxies the segments with the player page
+     * as Referer, which is what they are signed for.
+     */
+    static final class InlineVar {
+        String file;      // video5_chargers.m3u8
+        String inf;       // #EXT-X-STREAM-INF:BANDWIDTH=10000000,RESOLUTION=1920x1080...
+        int bw;
+        String playlist;  // #EXTM3U ... absolute segment URLs
+    }
+
+    private static final Pattern P_MASTERINF_J = Pattern.compile("masterinf\\s*=\\s*\\{");
+    private static final Pattern P_PAYLOAD_J = Pattern.compile("payload\\s*=\\s*\\{");
+    private final Map<String, String[]> inlineSrc = new HashMap<String, String[]>();   // id -> {page, referer}
+    private final Map<String, Object[]> inlineCache = new HashMap<String, Object[]>(); // id -> {ts, List<InlineVar>}
+    private static final long INLINE_TTL_MS = 3000L;
+
+    /** The JSON object assigned at `rx` in a page: brace-matched and string-aware. */
+    private static JSONObject jsonAfter(String text, Pattern rx) {
+        if (text == null) return null;
+        Matcher m = rx.matcher(text);
+        if (!m.find()) return null;
+        int start = m.end() - 1;
+        int depth = 0;
+        boolean instr = false, esc = false;
+        int end = Math.min(text.length(), start + 4_000_000);
+        for (int j = start; j < end; j++) {
+            char ch = text.charAt(j);
+            if (instr) {
+                if (esc) esc = false;
+                else if (ch == '\\') esc = true;
+                else if (ch == '"') instr = false;
+            } else {
+                if (ch == '"') instr = true;
+                else if (ch == '{') depth++;
+                else if (ch == '}') {
+                    depth--;
+                    if (depth == 0) {
+                        try {
+                            return new JSONObject(text.substring(start, j + 1));
+                        } catch (Exception e) {
+                            return null;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Variants the page carries inline, best bandwidth first, or null. */
+    private static List<InlineVar> inlineFrom(String html) {
+        JSONObject master = jsonAfter(html, P_MASTERINF_J);
+        JSONObject payload = jsonAfter(html, P_PAYLOAD_J);
+        if (master == null || payload == null) return null;
+        JSONObject rend = payload.optJSONObject("renditions");
+        if (rend == null || rend.length() == 0) return null;
+        List<InlineVar> out = new ArrayList<InlineVar>();
+        java.util.Iterator<String> it = master.keys();
+        while (it.hasNext()) {
+            String name = it.next();
+            String key = name.toLowerCase(Locale.US).endsWith(".m3u8")
+                    ? name.substring(0, name.length() - 5) : name;
+            String pl = rend.optString(key, "");
+            if (pl.length() == 0) pl = rend.optString(name, "");
+            if (!pl.contains("#EXTM3U")) continue;
+            JSONObject meta = master.optJSONObject(name);
+            String inf = meta == null ? "" : meta.optString("inf", "");
+            InlineVar v = new InlineVar();
+            v.file = name.toLowerCase(Locale.US).endsWith(".m3u8") ? name : key + ".m3u8";
+            v.inf = inf;
+            v.playlist = pl;
+            Matcher mb = Pattern.compile("BANDWIDTH=(\\d+)").matcher(inf);
+            v.bw = mb.find() ? Integer.parseInt(mb.group(1)) : 0;
+            out.add(v);
+        }
+        if (out.isEmpty()) return null;
+        java.util.Collections.sort(out, new java.util.Comparator<InlineVar>() {
+            public int compare(InlineVar a, InlineVar b) { return b.bw - a.bw; }
+        });
+        return out;
+    }
+
+    private static String inlineId(String page, String referer) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-1");
+            byte[] d = md.digest((page + "|" + (referer == null ? "" : referer)).getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 8; i++) sb.append(String.format(Locale.US, "%02x", d[i]));
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString((page + (referer == null ? "" : referer)).hashCode());
+        }
+    }
+
+    private String inlineRegister(String page, String referer) {
+        String sid = inlineId(page, referer);
+        synchronized (inlineSrc) {
+            inlineSrc.put(sid, new String[]{page, (referer == null || referer.length() == 0) ? page : referer});
+        }
+        return sid;
+    }
+
+    /** Fresh variants for one registered page, retried: the shell answer is normal. */
+    private List<InlineVar> inlineVariants(String sid) {
+        String[] src;
+        synchronized (inlineSrc) { src = inlineSrc.get(sid); }
+        if (src == null) return null;
+        synchronized (inlineCache) {
+            Object[] hit = inlineCache.get(sid);
+            if (hit != null && System.currentTimeMillis() - (Long) hit[0] < INLINE_TTL_MS) {
+                @SuppressWarnings("unchecked")
+                List<InlineVar> cached = (List<InlineVar>) hit[1];
+                return cached;
+            }
+        }
+        for (int attempt = 0; attempt < 3; attempt++) {
+            String html = "";
+            try {
+                Map<String, String> hd = new HashMap<String, String>();
+                hd.put("Referer", src[1]);
+                html = Http.get(src[0], 20000, hd).text();
+            } catch (Exception ignored) { }
+            List<InlineVar> vs = inlineFrom(html);
+            if (vs != null) {
+                synchronized (inlineCache) {
+                    inlineCache.put(sid, new Object[]{System.currentTimeMillis(), vs});
+                }
+                return vs;
+            }
+            if (attempt < 2) {
+                try { Thread.sleep(500); } catch (InterruptedException ignored) { }
+            }
+        }
+        return null;
+    }
+
+    private String inlineMaster(String sid) {
+        List<InlineVar> vs = inlineVariants(sid);
+        if (vs == null) return null;
+        StringBuilder sb = new StringBuilder("#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-INDEPENDENT-SEGMENTS\n");
+        for (InlineVar v : vs) {
+            sb.append(v.inf.length() > 0 ? v.inf
+                    : "#EXT-X-STREAM-INF:BANDWIDTH=" + v.bw).append('\n');
+            sb.append(v.file).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private String inlineMedia(String sid, String name) {
+        List<InlineVar> vs = inlineVariants(sid);
+        if (vs == null) return null;
+        for (InlineVar v : vs) {
+            if (v.file.equals(name)) return v.playlist;
+        }
+        return null;
+    }
+
+    /**
+     * A name a page invented is not a stream: fetch it and look at the first bytes.
+     * "globalurl = 'chargers.m3u8'" joins to a path that answers 404 on the page's
+     * own host -- accepting it made a live game "resolve" and then fail to start.
+     */
+    private static boolean isPlaylist(String url, String referer) {
+        try {
+            Map<String, String> hd = new HashMap<String, String>();
+            if (referer != null && referer.length() > 0) hd.put("Referer", referer);
+            String t = Http.get(url, 8000, hd).text();
+            return t != null && t.trim().toUpperCase(Locale.US).startsWith("#EXTM3U");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private static final String[] CHATTY = {"chat", "discord", "telegram", "t.me/",            "whatsapp", "instagram", "tiktok", "facebook.com", "twitter.com", "x.com/",
             "youtube.com", "disqus", "livechat", "21aims"};
 
@@ -835,6 +1069,23 @@ final class LocalHub {
             String text = resp.text();
             Map<String, String> k = keysIn(text);
             if (k != null) keys = k;
+            // a page that carries its playlists inline ends the walk: there is no
+            // URL to follow and its own `globalurl` is a relative dud
+            if (inlineFrom(text) != null) {
+                String sid = inlineRegister(resp.finalUrl, resp.finalUrl);
+                try {
+                    return new JSONObject()
+                            .put("ok", true)
+                            .put("m3u8", "http://127.0.0.1:" + server.getLocalPort()
+                                    + "/inline/" + sid + "/index.m3u8")
+                            .put("inline", true)
+                            .put("via", hostOf(resp.finalUrl))
+                            .put("hops", seen.size())
+                            .put("referer", resp.finalUrl);
+                } catch (Exception e) {
+                    return null;
+                }
+            }
             String found = directStreamIn(text);
             if (found != null) {
                 found = Http.join(resp.finalUrl, found);
@@ -849,18 +1100,24 @@ final class LocalHub {
                             + "sessionId=" + java.util.UUID.randomUUID();
                 }
                 if (keys != null) lastClearKeys = keys;
-                try {
-                    return new JSONObject()
-                            .put("ok", true)
-                            .put("m3u8", found)
-                            .put("via", hostOf(found))
-                            .put("hops", seen.size())
-                            .put("referer", resp.finalUrl);
-                } catch (Exception e) {
-                    return null;
+                // a name the page invented is not a stream: it must answer like one
+                if (isPlaylist(found, resp.finalUrl)) {
+                    try {
+                        return new JSONObject()
+                                .put("ok", true)
+                                .put("m3u8", found)
+                                .put("via", hostOf(found))
+                                .put("hops", seen.size())
+                                .put("referer", resp.finalUrl);
+                    } catch (Exception e) {
+                        return null;
+                    }
                 }
+                trace.put("hop " + hop + ": " + hostOf(cur) + " named " + found
+                        + " -- not a playlist");
+            } else {
+                trace.put("hop " + hop + ": " + hostOf(cur) + " (" + text.length() + " bytes), no stream named");
             }
-            trace.put("hop " + hop + ": " + hostOf(cur) + " (" + text.length() + " bytes), no stream named");
             String nxt = nextHopIn(text);
             if (nxt == null) { reason = "hop " + hop + " (" + hostOf(cur) + ") names no iframe and no stream"; break; }
             cur = nxt.startsWith("http") ? nxt : Http.join(resp.finalUrl, nxt);
