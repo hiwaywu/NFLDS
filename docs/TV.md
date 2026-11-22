@@ -137,6 +137,49 @@ tokenised `/main/secure/...` URL starts answering 404 — those epochs rotate ev
 a cached manifest is good for one session only (the relay's current behaviour is to retry the same
 404 until it gives up, which is exactly how a 1080p game "stopped working").
 
+## Why some games are 720p and no setting changes it
+
+Two separate ceilings, and both look the same on screen.
+
+**The broadcast.** The picture starts as whatever the network produces:
+
+| Window | Native format | The best any legal source can hand over |
+|---|---|---|
+| CBS / FOX Sunday afternoon | 1080i | 1080p after deinterlace — measured here: 1920x1080 @ 59.94 |
+| NBC Sunday Night | 1080i | same |
+| ESPN / ABC (MNF, some Saturdays) | **720p60 by design** | **720p — no 1080p version of MNF exists anywhere** |
+| Prime Thursday Night | 1080p HDR (HDR10) | 1080p, DRM'd |
+| NFL+ live | commonly 720p | 720p |
+| Sunday Ticket (YouTube) | the broadcaster's feed | exactly that broadcaster's format |
+
+**The mirror's own encode.** A FOX 1080i game can be published at 720p, and the same site
+publishes several qualities for one event. Measured on 2026-11-22, same night, same site:
+
+```text
+Jaguars-Giants   .../newyorkgiants_cbs/index.m3u8         1920x1080  (decoded 59.94)
+                 .../newyorkgiants_cbs_540p/index.m3u8     960x540
+                 .../nfl-401873069_1080p.m3u8              1920x1080, 6 MB / 6 s, clear
+Jets-Chargers    .../nfl-401873085_720p.m3u8               1280x720 @ 4.79 Mbps
+Raiders-Broncos  .../nfl-401873075_720p.m3u8               1280x720 @ 4.79 Mbps
+```
+
+The path names the quality (`_1080p`, `_720p`, `_cbs_540p`), which is why the resolver reads
+the filename when a CDN refuses to hand its playlist to the shell, and why "the pill says
+1920x1080 but it looks soft" happens: some rungs are upscaled 720p with a 1080 label. The
+pill now prints the decoder's own answer.
+
+**Do the mirrors rip the paid services?** Rarely, and it does not help us when they do. What
+these sites redistribute is the broadcast capture — the giveaway is the FOX / CBS / NBC bug in
+the picture. Sunday Ticket, NFL+ and Prime TNF are Widevine (often L1) with account-bound
+tokens; NBA Hub hit exactly that wall with League Pass (`hpnba…/hls-wvpr…`, SAMPLE-AES-CTR,
+Widevine PSSH + PlayReady WRM) and its note says the route needs a CDM — a `device.wvd` blob
+plus pywidevine — not a URL. A mirror that does relay a paid feed hands it over Widevine-wrapped,
+which this player cannot decode.
+
+So: the app takes the best rung that exists and prefers a real 1080p ladder when a game has
+one. It cannot invent pixels. Guaranteed 1080p at any hour is the linear channel — NFL Channel
+on Samsung TV Plus decoded true 1920x1080.
+
 ## 1080p, measured rather than labelled
 
 The ladder's `RESOLUTION=` lines are not evidence. On a live game this mirror family
