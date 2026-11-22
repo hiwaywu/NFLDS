@@ -806,26 +806,25 @@ const DELAY = { normal: 2, low: 1.25 };
 let stallCount = 0;
 v.addEventListener('waiting', () => { stallCount++; noteStall(); });
 
-function hlsConfig(){
+function hlsConfig(fastLive){
   const target = lowMode ? DELAY.low : DELAY.normal;
-  // A television is a weaker decoder than a phone, and it shows — but the bigger
-  // difference is the feed. The inline family answers a page whose rendition carries
-  // a ~78 s window that jumps forward in ~30 s bursts (measured on a live game:
-  // media-sequence 612 -> 617 in 8 s, then frozen at 617 for 20 s). Chasing that
-  // edge — hls.js live-sync inside 16 s plus the hard ceiling further down — is what
-  // made the picture hop from scene to scene. On a TV the playhead therefore sits
-  // well back (4 segments ≈ 24 s), catches up at barely above realtime, and a burst
-  // landing ahead of it is absorbed by the window instead of by a seek.
+  // Two kinds of live source, two timings:
+  //   our relay (`/relay/live.m3u8`) -- a normal 6 s-segment stream served from
+  //   localhost, so it can sit close to the edge: 2 segments back, 16 s ceiling.
+  //   the inline family (`/inline/...`) -- a ~78 s window that lands in ~30 s bursts
+  //   (measured: media-sequence 612 -> 617 in 8 s, then frozen), so a TV sits 4
+  //   segments back with a 60 s ceiling instead of chasing it and jumping scenes.
   const isTv = typeof TV !== 'undefined' && TV;
+  const near = !!fastLive;
   return {
     lowLatencyMode: false,
     enableWorker: true,                 // demux off the main thread = no UI jank
-    backBufferLength: isTv ? 20 : 30,   // keep 30 s of history for instant seek-back
-    maxBufferLength: isTv ? 45 : (lowMode ? 15 : 30), // how far ahead hls.js fills
-    maxMaxBufferLength: isTv ? 90 : 60,
-    liveSyncDurationCount: isTv ? 4 : target,        // where playback sits vs the edge
-    liveMaxLatencyDurationCount: isTv ? 12 : target + 1.5,  // correct long before it drifts far
-    maxLiveSyncPlaybackRate: isTv ? 1.05 : 1.35,     // speed up to catch up instead of jumping
+    backBufferLength: near ? 30 : (isTv ? 20 : 30),
+    maxBufferLength: near ? 30 : (isTv ? 45 : (lowMode ? 15 : 30)),
+    maxMaxBufferLength: near ? 60 : (isTv ? 90 : 60),
+    liveSyncDurationCount: near ? (lowMode ? 1.25 : 2) : (isTv ? 4 : target),
+    liveMaxLatencyDurationCount: near ? (lowMode ? 2.5 : 3.5) : (isTv ? 12 : target + 1.5),
+    maxLiveSyncPlaybackRate: near ? 1.35 : (isTv ? 1.05 : 1.35),
     manifestLoadingTimeOut: 20000,
     manifestLoadingMaxRetry: 10,        // the relay answers 503 until its first segment
     manifestLoadingRetryDelay: 700,
@@ -937,7 +936,8 @@ function attach(url, keys){
   v.removeAttribute('src');
   setSpin(true, 'starting the stream...');
   if (window.Hls && Hls.isSupported()){
-    const cfg = hlsConfig();
+    // '/relay/' is our own relay: a normal live stream, safe to keep close to the edge
+    const cfg = hlsConfig(/\/relay\//.test(url));
     if (keys && typeof keys === 'object' && Object.keys(keys).length){
       // hls.js path kept for non-game feeds that happen to carry keys
       cfg.emeEnabled = true;
@@ -1040,11 +1040,12 @@ setInterval(() => {
   const target = lowMode ? DELAY.low : DELAY.normal;
   const lat = hls.latency;
   if (typeof lat !== 'number' || !isFinite(lat)) return;
-  // A TV gets a much wider ceiling. The inline family's window jumps forward in
+  // A TV gets a much wider ceiling on the *inline* family, whose window jumps forward in
   // ~30 s bursts; a hard seek into each burst flushes the hardware decoder and lands
-  // mid-scene, which is the "it jumped again" feeling. The playback-rate nudge above
-  // handles normal drift, so the seek is only for a playhead that is really gone.
-  const slack = (typeof TV !== 'undefined' && TV) ? 60 : 4;
+  // mid-scene, which is the "it jumped again" feeling. A relay stream is ordinary live
+  // HLS served from localhost, so it keeps the tight ceiling and stays near the edge.
+  const onRelay = !!relayBase;
+  const slack = (onRelay || !(typeof TV !== 'undefined' && TV)) ? 4 : 60;
   const ceiling = dvrHold ? Math.max(target * 6 + slack, dvrSeconds - 12) : target * 6 + slack;
   if (lat > ceiling && typeof hls.liveSyncPosition === 'number'){
     try { v.currentTime = hls.liveSyncPosition; } catch(e){}
@@ -1499,8 +1500,14 @@ function sniffStream(u, referer){
 // resolved, every master is read, and the ladder with the highest rung wins -- with
 // the decoder as the last word once a candidate is actually on screen.
 const pickCache = {};        // game url -> the candidate that measured best
-// Off until the relay can pull the mirror's token CDN (see the note in watchGame).
-const SHARP_HUNT = false;
+// On: the mirror's `/main/secure/..._1080p.m3u8` really is 1920x1080@59.94 and the relay
+// pulls it fine -- what kills it is the token, which lives about two minutes and then
+// answers 404 (measured: the same URL answers 200 from the PC, then 404 a minute later
+// from the same client). startLiveGuard() renews it from the player page, so the sharp
+// ladder is usable; the hunt only runs once the picture is already up, so it costs no
+// startup time.
+const SHARP_HUNT = true;
+let lastAutoResolve = 0;
 
 /** The best rung a master or media playlist advertises. */
 function topOfLadder(text){
@@ -1634,13 +1641,20 @@ async function huntSharp(g, ranked, attached, links){
   for (const link of links.slice(0, 3)){
     if (haveSource[link]) continue;
     if (attached && attached.h >= 1080 && v.videoHeight >= 1000) break;
-    try {
-      const s = await sniffStream(link, g.url);
-      if (!s || !s.m3u8) continue;
-      s.frame = link;
-      const r = await rankCandidate(s);
-      if (r) ranked.push(r);
-    } catch(e){}
+    // two looks per link: the engine's first pass can catch the page mid-setup or an ad
+    // layer, and the sharp ladder (tims-001) only appears once the player asks for it
+    for (let attempt = 0; attempt < 2; attempt++){
+      try {
+        const s = await sniffStream(link, g.url);
+        if (s && s.m3u8){
+          s.frame = link;
+          const r = await rankCandidate(s);
+          if (r) ranked.push(r);
+          break;
+        }
+      } catch(e){}
+      await new Promise(r => setTimeout(r, 1000));
+    }
   }
   ranked.sort(function(a, b){ return (b.h - a.h) || (b.bw - a.bw); });
   return ranked;
@@ -1727,7 +1741,13 @@ function startLiveGuard(g, frame, cand){
       } catch(e){}
       startLiveGuard(g, frame, cand);
     } else {
-      toast('feed token rotated and could not be renewed - reload the stream', 4000);
+      toast('feed token rotated and could not be renewed - resolving the game again', 4000);
+      // one automatic re-resolve per couple of minutes: the page we were sniffing from
+      // may itself have moved on, and a full resolve is what a viewer would do next
+      if (Date.now() - lastAutoResolve > 120000){
+        lastAutoResolve = Date.now();
+        try { watchGame(g); } catch(e){}
+      }
     }
   }, local ? 12000 : 20000);
 }
@@ -2880,3 +2900,4 @@ boot();
 </script>
 </body>
 </html>
+
