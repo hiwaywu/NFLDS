@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -21,6 +22,7 @@ import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -135,12 +137,22 @@ public class MainActivity extends Activity {
 
     private View fullView;
     private WebChromeClient.CustomViewCallback fullCallback;
+    /** A television: the page switches to its browse-and-remote interface, and the
+     *  shell stops expecting touches that will never come. */
+    private boolean tv = false;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        PackageManager pm = getPackageManager();
+        tv = "com.nflds.tv".equals(getPackageName())
+                || pm.hasSystemFeature("android.software.leanback")
+                || pm.hasSystemFeature("android.software.leanback_only")
+                || pm.hasSystemFeature("android.hardware.type.television");
+        if (tv) Log.i(TAG, "television build: page gets Hub.tv() = true");
 
         hub = new LocalHub(this);
         try {
@@ -276,6 +288,11 @@ public class MainActivity extends Activity {
                 // overlay, play, and keep nudging for a few seconds.
                 Log.i(TAG, "page finished: " + url);
                 if (url != null && !isHome(url)) kickPlayback(view);
+                // The TV page still takes the D-pad from the WebView when a shell is
+                // not naming the keys (a desktop browser opened with ?tv=1). Here the
+                // shell does name them, so tell the page to let go of raw keydown --
+                // otherwise one press moves the cursor twice.
+                if (tv) view.evaluateJavascript("window.__nflTvShell=1;0", null);
             }
 
             @Override
@@ -940,6 +957,18 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean standalone() { return true; }
 
+        /** Is this a television? Decides which interface the page builds. */
+        @JavascriptInterface
+        public boolean tv() { return tv; }
+
+        /** The page decided Back means "leave": only the shell can finish. */
+        @JavascriptInterface
+        public void exit() {
+            runOnUiThread(new Runnable() {
+                public void run() { finish(); }
+            });
+        }
+
         @JavascriptInterface
         public void hubReady() { Log.i(TAG, "page ready"); }
     }
@@ -1114,9 +1143,114 @@ public class MainActivity extends Activity {
         if (hasFocus) goFullscreen();
     }
 
+    // ---------------------------------------------------------------- remote
+
+    /** The remote's media keys and Menu, as names the page understands. */
+    private static String tvKeyName(int code) {
+        switch (code) {
+            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:   return "playpause";
+            case KeyEvent.KEYCODE_MEDIA_PLAY:         return "play";
+            case KeyEvent.KEYCODE_MEDIA_PAUSE:        return "pause";
+            case KeyEvent.KEYCODE_MEDIA_REWIND:       return "rewind";
+            case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD: return "forward";
+            case KeyEvent.KEYCODE_MENU:               return "menu";
+            default: return null;
+        }
+    }
+
+    /**
+     * Every key the remote has, on a television: arrows and OK drive the page's
+     * browse screen or its info bar, media keys and Menu go with them. All of them
+     * are consumed -- Fire OS's WebView does not pass D-pad keys to a page, it uses
+     * them for its own focus traversal, which is why OK did nothing on the first
+     * Fire TV run. The page therefore receives keys by name and nothing else.
+     *
+     * While a site's own player page is up (a game that fell back to the site), the
+     * page answers by clicking what is on screen: window.tvShot(), which is the only
+     * way a D-pad reaches a page that was never written for one.
+     */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        if (tv && web != null && e.getAction() == KeyEvent.ACTION_DOWN) {
+            String name = null;
+            switch (e.getKeyCode()) {
+                case KeyEvent.KEYCODE_DPAD_UP:            name = "up"; break;
+                case KeyEvent.KEYCODE_DPAD_DOWN:          name = "down"; break;
+                case KeyEvent.KEYCODE_DPAD_LEFT:          name = "left"; break;
+                case KeyEvent.KEYCODE_DPAD_RIGHT:         name = "right"; break;
+                case KeyEvent.KEYCODE_DPAD_CENTER:        name = "ok"; break;
+                case KeyEvent.KEYCODE_ENTER:
+                case KeyEvent.KEYCODE_NUMPAD_ENTER:       name = "ok"; break;
+                default:                                  name = tvKeyName(e.getKeyCode());
+            }
+            if (name != null) {
+                if (e.getRepeatCount() == 0) sendTvKey(name);
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
+    /**
+     * A key press while a game page is showing. window.tvShot() turns it into a
+     * click on the page (or hands the frame the focus); 'done' means it acted.
+     */
+    private void sendGameKey(String name) {
+        if (web == null) return;
+        String q = org.json.JSONObject.quote(name);
+        web.evaluateJavascript("(function(k){"
+                + "if(!document.body.classList.contains('iframeMode'))return 'no';"
+                + "try{return window.tvShot?window.tvShot(k):'no';}catch(e){return 'no';}})(" + q + ")",
+                new ValueCallback<String>() {
+                    public void onReceiveValue(String r) {
+                        Log.i(TAG, "game key " + name + " -> " + r);
+                    }
+                });
+    }
+
+    private void sendTvKey(String k) {
+        Log.i(TAG, "remote: " + k);
+        String q = org.json.JSONObject.quote(k);
+        // the hub page first (its browse screen, its info bar, its <video>); when it
+        // is not the page we are on -- a game page alone in the WebView -- drive the
+        // first <video> on screen instead, because that page knows nothing of us
+        web.evaluateJavascript("(function(k){"
+                + "var rt=(function(){try{return window.tvKey?window.tvKey(k):null;}catch(e){return null;}})();"
+                + "if(rt==='done')return;"
+                + "var v=document.querySelector('video');if(!v)return;"
+                + "try{if(k==='ok'||k==='playpause'||k==='play'||k==='pause'){"
+                + "if(k==='pause'||(k==='playpause'&&!v.paused)){v.pause();}else{v.muted=false;v.play();}}"
+                + "else if(k==='rewind'){v.currentTime=Math.max(0,v.currentTime-10);}"
+                + "else if(k==='forward'){v.currentTime=v.currentTime+10;}}catch(e){}})(" + q + ")", null);
+    }
+
+    /**
+     * Back on a TV, decided in two steps because asking through a WebView is async:
+     *   1. an in-app game page: goBack() to the hub, which is its own screen;
+     *   2. the hub page: ask window.tvBack() -- only its "false" (the browse screen
+     *      showing, nothing playing) leaves the app.
+     */
+    private void tvBack() {
+        if (web == null) { finish(); return; }
+        String cur = web.getUrl() == null ? "" : web.getUrl();
+        if (cur.startsWith("http") && !isHome(cur)) {
+            if (web.canGoBack()) { Log.i(TAG, "tv back: to the hub"); web.goBack(); }
+            else { Log.i(TAG, "tv back: to the hub (no history)"); goHome(); }
+            return;
+        }
+        web.evaluateJavascript("(function(){try{return window.tvBack?window.tvBack():false;}catch(e){return false;}})()",
+                new ValueCallback<String>() {
+                    public void onReceiveValue(String r) {
+                        Log.i(TAG, "tv back -> " + r);
+                        if (!"true".equals(r)) finish();
+                    }
+                });
+    }
+
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
         if (code == KeyEvent.KEYCODE_BACK && web != null) {
+            if (tv) { tvBack(); return true; }
             if (fullView != null) {
                 web.evaluateJavascript("document.fullscreenElement && document.exitFullscreen()", null);
                 leaveCustomView();

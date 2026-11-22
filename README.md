@@ -10,7 +10,8 @@ tricks, football-specific differences — see [docs/PROCESS.md](docs/PROCESS.md)
 | Piece | Runs on | What it does |
 |---|---|---|
 | `nfl/` + `pc/` | Windows (Python 3.11+ or the portable bundle) | schedule sync, feed harvesting, HLS relay, browser UI, `NFLHub.exe` launcher |
-| `android/` | any Android 7+ phone | standalone app: hub + relay + WebView inside one 385 KB APK |
+| `android/` | any Android 7+ phone | standalone app: hub + relay + WebView inside one 409 KB APK |
+| `android/ -Tv` | Fire TV / Android TV | the same app with a card browser, a remote-driven info bar and full-screen playback (`com.nflds.tv`) — see [docs/TV.md](docs/TV.md) |
 
 ---
 
@@ -50,6 +51,21 @@ adb install --no-incremental releases\NFLHub.apk
 adb shell am start -n com.nflds.app/.MainActivity --es chan 0     # straight into NFL TV
 adb shell am start -n com.nflds.app/.MainActivity --es url https://host/main/1   # any page
 ```
+
+## Quick start (Fire TV / Android TV)
+
+```powershell
+cd android
+powershell -ExecutionPolicy Bypass -File build.ps1 -Tv    # -> NFLHub-TV.apk
+adb connect <fire-tv-ip>:5555                             # ADB debugging on in Developer Options
+adb install -r ..\releases\NFLHub-TV.apk
+```
+
+It installs as **its own app** (`com.nflds.tv`), shows up on the Fire TV home row with a banner,
+and opens on a card browser: ▲▼ rows, ◀▶ cards (top row changes the day), **OK plays the focused
+game full screen**, Back leaves the app. The picture's info bar (sound, go live, low delay,
+reload, frozen?, stop) comes up on any key while watching. Full details, the measured timing
+policy and how to check it without a television: [docs/TV.md](docs/TV.md).
 
 ## How a game gets on screen
 
@@ -144,6 +160,10 @@ start (and on `reload list`), so a dead mirror is fixed by editing that file on 
   **both** teams; the matcher requires both, and a one-sided hit is ignored.
 - Browsing the PC hub from another device needs ports `8795` and `8960-9019` reachable; a
   guest/client-isolated wifi will not let you.
+- **On a television the picture sits further behind live on purpose.** The inline family hands
+  over a ~78 s window that lands in ~30 s bursts, and a Fire TV's decoder flushes visibly on every
+  seek, so the TV build plays ~24 s back and only jumps when the delay is really gone. Measured
+  27–55 s behind the edge, rock steady; a `live` press in the info bar gives it back.
 
 ## Verification
 
@@ -168,6 +188,12 @@ same slate, the inline family played **1920x1080 with audio in both places** —
 named `inline/…/video5_chargers.m3u8` at 10 Mbps. `python tools/build_portable.py --zip` rebuilds
 the portable bundle.
 
+Fire TV, measured 2026-11-22 on a live Jets–Chargers game: the Fire TV Stick 4K (Fire OS 7,
+WebView Chromium 75) resolved the game through the same inline ladder and decoded **1280x720 AVC
+at 30 fps / ~6 Mbps with audio**; a 3-minute soak on the `Television_4K` emulator held `readyState`
+4 with the playhead moving 35 s → 203 s and **no** mirror failures (docs/TV.md has the numbers and
+the three TV-only fixes they caused).
+
 ## Layout
 
 ```text
@@ -176,6 +202,7 @@ nfl/            hub, relay, probes, CLI launchers, feeds.txt
 pc/             NFLPC.cs (the launcher), build-pc.ps1, app.ico
 tools/          deploy.ps1, build_portable.py, fixture_stream.py, live_probe.py, the harnesses
 android/        manifest, src/ (LocalHub, Relay, Games, Http, MainActivity), res/, build.ps1
-releases/       NFLHub.apk (389 KB, standalone), NFLHub-portable.zip
-docs/           PROCESS.md (the port map), screenshots, helper scripts
+  tv/           the TV manifest: leanback launcher, banner, no touchscreen (build.ps1 -Tv)
+releases/       NFLHub.apk (phone), NFLHub-TV.apk (Fire TV, com.nflds.tv), NFLHub-portable.zip
+docs/           PROCESS.md (the port map), TV.md (Fire TV), screenshots, helper scripts
 ```

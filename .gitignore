@@ -1,8 +1,9 @@
-# build output
+﻿# build output
 android/build/
 android/debug.keystore
 android/*.idsig
 android/NFLHub.apk
+android/NFLHub-TV.apk
 *.keystore
 dist/
 

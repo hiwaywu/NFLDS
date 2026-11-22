@@ -234,6 +234,136 @@
   }
 #list{-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain}
 body{transition:none!important}
+
+  /* ---------------- Fire TV / Android TV (body.tv) ----------------
+     Ported from NBA Hub, whose TV build is the reference for this screen: a TV
+     gets its own interface, not the phone page. A full-screen browse screen of
+     big cards in rows, and full-screen playback with an info bar that comes up
+     on a key press. The phone/PC page underneath stays as it is; on a TV only
+     its player (#stage) is shown, behind #tv. */
+  body.tv{display:block}
+  body.tv #side,body.tv #bar,body.tv #idle,body.tv #reloadStream,body.tv #fsexit{display:none !important}
+  body.tv #main{position:fixed;top:0;right:0;bottom:0;left:0;width:100vw;height:100vh;display:block}
+  body.tv #stage{position:absolute;top:0;right:0;bottom:0;left:0;width:100vw !important;height:100vh !important;
+    max-height:none !important;aspect-ratio:auto !important}
+  body.tv #unmute{display:none !important}
+  body.tv #toast{z-index:80;bottom:auto;top:18px;font-size:13px;padding:8px 14px}
+  body.tv #spinner{z-index:6;font-size:13px}
+  body.tv #chip{font-size:12px}
+  body.tv #diag{z-index:90;font-size:11px}
+  body.tv #diag h2{font-size:15px}
+  body.tv #diag .close.tvf{outline:3px solid var(--accent)}
+
+  html.tvroot{font-size:calc(100vw / 96)}   /* 1rem = 10px on a 960-wide TV viewport */
+  #tv{display:none}
+  body.tv #tv{display:block;position:fixed;top:0;right:0;bottom:0;left:0;z-index:50;pointer-events:none;
+    font-family:-apple-system,"Segoe UI",Roboto,system-ui,sans-serif}
+
+  #tvBrowse{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;flex-direction:column;pointer-events:auto;
+    background:radial-gradient(ellipse at 20% 0%,#16231c 0%,#0b0c0f 55%) #0b0c0f;transition:opacity .25s}
+  body.playing #tvBrowse,body.iframeMode #tvBrowse{
+    background:linear-gradient(180deg,rgba(6,7,9,.80) 0%,rgba(6,7,9,.90) 45%,rgba(6,7,9,.97) 100%)}
+  #tv.watching #tvBrowse{opacity:0;pointer-events:none}
+
+  #tvHead{display:flex;align-items:center;padding:1.74rem 2.98rem 0.5rem}
+  #tvBrand{display:flex;align-items:center;font-size:1.61rem;font-weight:800;letter-spacing:.3px;color:#fff}
+  #tvBrand i{width:0.87rem;height:0.87rem;border-radius:50%;background:var(--accent);box-shadow:0 0 0.99rem var(--accent)}
+  #tvDate{display:flex;align-items:center;margin:0 auto}
+  .tvbtn{background:rgba(255,255,255,.06);border:2px solid transparent;color:#c9cdd6;border-radius:0.74rem;
+    font:600 1.12rem -apple-system,"Segoe UI",sans-serif;padding:0.62rem 1.12rem;transition:transform .12s,background .12s}
+  .tvbtn.arrow{width:3.22rem;padding:0.62rem 0;font-size:1.36rem}
+  #tvDay{min-width:13.64rem;text-align:center}
+  #tvDay small{display:block;font-size:0.81rem;font-weight:500;color:var(--dim)}
+  #tvClock{font-size:1.36rem;color:var(--dim);font-variant-numeric:tabular-nums;min-width:6.82rem;text-align:right}
+  .tvf{border-color:var(--accent) !important;background:#1f3a2b !important;color:#fff !important;transform:scale(1.06)}
+
+  #tvNow{margin:0.37rem 2.98rem 0;font-size:0.93rem;color:var(--accent);height:1.36rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #tvRows{flex:1;overflow:hidden;padding:0.25rem 0 0;position:relative}
+  #tvRowsIn{transition:transform .22s ease}
+  .tvrow{padding:0.62rem 0 0.87rem}
+  .tvrow h2{margin:0 2.98rem 0.74rem;font-size:1.24rem;font-weight:700;color:#e9eaee;letter-spacing:.3px}
+  .tvrow h2 span{color:var(--dim2);font-weight:500;margin-left:0.62rem;font-size:0.99rem}
+  .tvstrip{display:flex;padding:0.5rem 2.98rem 0.62rem;transition:transform .22s ease}
+  .tvcard{flex:none;width:18.6rem;height:10.42rem;border-radius:0.99rem;background:#161920;border:0.19rem solid #1f232b;
+    position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;
+    padding:0.99rem 1.12rem;transition:transform .14s ease,border-color .14s,box-shadow .14s}
+  .tvcard.tvf{transform:scale(1.08);border-color:var(--accent);background:#161920 !important;
+    box-shadow:0 0.87rem 2.48rem rgba(0,0,0,.6),0 0 0 2px rgba(61,220,132,.25)}
+  .tvcard.dim{opacity:.55}
+  .tvcard.tvf.dim{opacity:1}
+  .tvmeta{display:flex;align-items:center;font-size:0.93rem;color:var(--dim)}
+  .tvchip{font-size:0.78rem;font-weight:800;letter-spacing:.6px;padding:0.25rem 0.56rem;border-radius:0.37rem;background:#262a32;color:#c9cdd6}
+  .tvchip.live{background:#ff3b3b;color:#fff;animation:tvpulse 1.6s ease-in-out infinite}
+  .tvchip.hd{background:#16281f;color:var(--accent)}
+  .tvchip.now{background:var(--accent);color:#06210f}
+  @keyframes tvpulse{50%{opacity:.6}}
+  .tvcard.chan{background:linear-gradient(135deg,#132a20 0%,#161920 70%)}
+  .tvcard.chan .tvlogo{font-size:2.11rem;font-weight:900;letter-spacing:1px;color:#fff}
+  .tvcard.chan .tvlogo em{font-style:normal;color:var(--accent)}
+  .tvcard.chan .tvname{font-size:0.93rem;color:#c9cdd6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tvcard.info{width:32.24rem;justify-content:center;}
+  .tvcard.info .t1{font-size:1.24rem;font-weight:700;color:#e9eaee}
+  .tvcard.info .t2{font-size:0.93rem;color:var(--dim)}
+  #tvFoot{padding:0.62rem 2.98rem 1.36rem;font-size:0.87rem;color:var(--dim2);display:flex;}
+  #tvFoot b{color:var(--dim);font-weight:600}
+  #tvFoot i{font-style:normal}
+
+  #tvOsd{position:absolute;left:0;right:0;bottom:0;padding:3.72rem 2.98rem 1.86rem;pointer-events:auto;
+    background:linear-gradient(0deg,rgba(0,0,0,.92) 0%,rgba(0,0,0,.75) 55%,rgba(0,0,0,0) 100%);
+    opacity:0;transform:translateY(1.24rem);transition:opacity .22s,transform .22s}
+  #tv.watching.osd #tvOsd{opacity:1;transform:none}
+  #tv:not(.watching) #tvOsd{display:none}
+  #tvOsdTitle{font-size:1.74rem;font-weight:700;color:#fff;margin-bottom:0.37rem}
+  #tvOsdStat{font-size:0.93rem;color:var(--dim);margin-bottom:1.12rem;display:flex;flex-wrap:wrap}
+  #tvOsdStat .g{color:var(--accent)}
+  #tvOsdBtns{display:flex;}
+  #tvHint{position:absolute;top:1.86rem;left:50%;transform:translateX(-50%);background:rgba(18,20,24,.88);
+    border:1px solid #2c3038;color:#e9eaee;border-radius:0.74rem;padding:0.74rem 1.36rem;font-size:1.05rem;
+    opacity:0;transition:opacity .25s;white-space:nowrap}
+  #tvHint.show{opacity:1}
+
+  /* ---- backdrop: dark stadium, faint field lines, a glow in the focused game's colours */
+  #tvBg{position:absolute;top:0;right:0;bottom:0;left:0;overflow:hidden;background:#06070a;z-index:0}
+  #tvBrowse>*:not(#tvBg){position:relative;z-index:1}
+  #tvGlowA,#tvGlowB{position:absolute;width:70rem;height:70rem;border-radius:50%;opacity:.38;
+    background-image:radial-gradient(closest-side,currentColor 0%,transparent 100%);transition:color .6s ease}
+  #tvGlowA{left:-26rem;top:-34rem;color:#3ddc84}
+  #tvGlowB{right:-28rem;bottom:-40rem;color:#1f7a4c}
+  #tvField{position:absolute;right:-9rem;top:2rem;width:74rem;height:50rem;opacity:.07;
+    background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 630' fill='none' stroke='white' stroke-width='4'><rect x='2' y='2' width='1196' height='626' rx='10'/><line x1='600' y1='2' x2='600' y2='628'/><line x1='120' y1='2' x2='120' y2='628'/><line x1='240' y1='2' x2='240' y2='628'/><line x1='360' y1='2' x2='360' y2='628'/><line x1='480' y1='2' x2='480' y2='628'/><line x1='720' y1='2' x2='720' y2='628'/><line x1='840' y1='2' x2='840' y2='628'/><line x1='960' y1='2' x2='960' y2='628'/><line x1='1080' y1='2' x2='1080' y2='628'/><line x1='2' y1='210' x2='120' y2='210'/><line x1='2' y1='420' x2='120' y2='420'/><line x1='1080' y1='210' x2='1198' y2='210'/><line x1='1080' y1='420' x2='1198' y2='420'/><circle cx='600' cy='315' r='9'/><path d='M60 2 A315 315 0 0 1 60 628'/><path d='M1140 2 A315 315 0 0 0 1140 628'/></svg>") no-repeat center/contain}
+  #tvVignette{position:absolute;top:0;right:0;bottom:0;left:0;
+    background:linear-gradient(180deg,rgba(6,7,10,0) 0%,rgba(6,7,10,.35) 60%,rgba(6,7,10,.85) 100%),
+               radial-gradient(ellipse at 50% 40%,rgba(0,0,0,0) 40%,rgba(0,0,0,.55) 100%)}
+
+  /* ---- hero line: the focused game, big */
+  #tvNow{height:auto !important;min-height:4.6rem;margin:0.6rem 2.98rem 0 !important;color:#fff !important;white-space:normal !important}
+  #tvNow b{display:block;font-size:2.3rem;font-weight:800;letter-spacing:.02rem;line-height:1.2;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #tvNow span{display:block;font-size:1.25rem;color:#aab0bb;margin-top:0.25rem}
+
+  /* ---- game cards: logos */
+  .tvcard.game{height:12rem;padding:1rem 1.1rem 0.9rem;border-color:rgba(255,255,255,.07)}
+  .tvmatch{display:flex;align-items:center;justify-content:space-between}
+  .tvside{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0}
+  .tvlogoimg{width:5.2rem;height:5.2rem;object-fit:contain;filter:drop-shadow(0 0.3rem 0.6rem rgba(0,0,0,.55))}
+  .tvbadge{width:5.2rem;height:5.2rem;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:1.5rem;font-weight:900;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
+  .tvnick{margin-top:0.45rem;font-size:1.2rem;font-weight:700;color:#f1f2f5;max-width:100%;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tvvs{flex:none;padding:0 0.4rem 1.6rem;font-size:1.05rem;font-weight:800;color:rgba(255,255,255,.45);letter-spacing:.1rem}
+  .tvcard.game .tvmeta{justify-content:center}
+  .tvcard.tvf.game{box-shadow:0 1rem 2.6rem rgba(0,0,0,.7),0 0 0 2px rgba(61,220,132,.3)}
+  .tvcard.chan{border-color:rgba(61,220,132,.12)}
+  /* spacing by margins: the Fire TV's WebView is Chrome 75, which has no flex gap */
+  #tvHead>*+*{margin-left:1.24rem}
+  #tvBrand i{margin-right:0.75rem}
+  #tvDate .tvbtn+.tvbtn{margin-left:0.6rem}
+  .tvcard+.tvcard{margin-left:1.36rem}
+  .tvmeta .tvchip{margin-right:0.62rem}
+  .tvcard.info .t1{margin-bottom:0.5rem}
+  #tvFoot span+span{margin-left:1.74rem}
+  #tvOsdStat span{margin-right:1.12rem}
+  #tvOsdBtns .tvbtn+.tvbtn{margin-left:0.87rem}
 </style>
 </head>
 <body>
@@ -598,8 +728,15 @@ setInterval(() => {
   const t = v.currentTime;
   if (t !== mirrorLastT) { mirrorLastT = t; mirrorLastMove = now; return; }
   const frozen = now - mirrorLastMove;
-  const limit = dvrHold ? 15000 : 4000;     // deliberately behind: allow a slow seek to land
-  if (frozen > limit && v.readyState < 3){
+  // A television buffers in a different league: the feed's window arrives in ~30 s
+  // bursts and a Fire TV Stick's decoder is slow, so 4 s of "no new frame" is
+  // ordinary there, not a dead mirror. Measured on a live game: the 4 s rule fired
+  // and the page gave up on a feed that was about to play ("game feed failed
+  // (picture stalled)"). On a TV the rule waits 14 s and needs the element to be
+  // genuinely starved (readyState < 2) before blaming the feed.
+  const isTvNow = typeof TV !== 'undefined' && TV;
+  const limit = dvrHold ? 15000 : (isTvNow ? 14000 : 4000);
+  if (frozen > limit && v.readyState < (isTvNow ? 2 : 3)){
     mirrorFail('picture stalled');
   }
 }, 1000);
@@ -607,10 +744,11 @@ setInterval(() => {
 function noteStall(){
   // startup and the jump to the live edge raise 'waiting' by design -- only
   // buffering once the picture is running says anything about the mirror
-  if (Date.now() - attachAt < 12000 || v.seeking || Date.now() < seekGraceUntil) return;
+  if (Date.now() - attachAt < (typeof TV !== 'undefined' && TV ? 25000 : 12000)
+      || v.seeking || Date.now() < seekGraceUntil) return;
   mirrorStalls.push(Date.now());
   mirrorStalls = mirrorStalls.filter(t => Date.now() - t < 60000);
-  if (mirrorStalls.length >= 3) { mirrorStalls = []; mirrorFail('repeated buffering'); }
+  if (mirrorStalls.length >= (typeof TV !== 'undefined' && TV ? 5 : 3)) { mirrorStalls = []; mirrorFail('repeated buffering'); }
 }
 
 // ---------------------------------------------------------------- sound
@@ -670,15 +808,24 @@ v.addEventListener('waiting', () => { stallCount++; noteStall(); });
 
 function hlsConfig(){
   const target = lowMode ? DELAY.low : DELAY.normal;
+  // A television is a weaker decoder than a phone, and it shows — but the bigger
+  // difference is the feed. The inline family answers a page whose rendition carries
+  // a ~78 s window that jumps forward in ~30 s bursts (measured on a live game:
+  // media-sequence 612 -> 617 in 8 s, then frozen at 617 for 20 s). Chasing that
+  // edge — hls.js live-sync inside 16 s plus the hard ceiling further down — is what
+  // made the picture hop from scene to scene. On a TV the playhead therefore sits
+  // well back (4 segments ≈ 24 s), catches up at barely above realtime, and a burst
+  // landing ahead of it is absorbed by the window instead of by a seek.
+  const isTv = typeof TV !== 'undefined' && TV;
   return {
     lowLatencyMode: false,
     enableWorker: true,                 // demux off the main thread = no UI jank
-    backBufferLength: 30,               // keep 30 s of history for instant seek-back
-    maxBufferLength: lowMode ? 15 : 30, // how far ahead hls.js fills
-    maxMaxBufferLength: 60,
-    liveSyncDurationCount: target,      // where playback starts relative to the edge
-    liveMaxLatencyDurationCount: target + 1.5,   // correct long before it drifts far
-    maxLiveSyncPlaybackRate: 1.35,      // speed up to catch up instead of jumping
+    backBufferLength: isTv ? 20 : 30,   // keep 30 s of history for instant seek-back
+    maxBufferLength: isTv ? 45 : (lowMode ? 15 : 30), // how far ahead hls.js fills
+    maxMaxBufferLength: isTv ? 90 : 60,
+    liveSyncDurationCount: isTv ? 4 : target,        // where playback sits vs the edge
+    liveMaxLatencyDurationCount: isTv ? 12 : target + 1.5,  // correct long before it drifts far
+    maxLiveSyncPlaybackRate: isTv ? 1.05 : 1.35,     // speed up to catch up instead of jumping
     manifestLoadingTimeOut: 20000,
     manifestLoadingMaxRetry: 10,        // the relay answers 503 until its first segment
     manifestLoadingRetryDelay: 700,
@@ -774,7 +921,16 @@ function attach(url, keys){
   $('#reloadStream').style.display = 'none';
   $('#idle').style.display = 'none';
   document.body.classList.add('playing');
-  relayBase = url.replace(/\/live\.m3u8.*$/, '');
+  // Only a real relay (/relay/live.m3u8) has /stats behind it. The inline family is
+  // served straight from the page's own playlists, and asking the previous relay for
+  // its numbers put "100s buffered ... pull 122 Mbps" under a stream that has no relay
+  // at all -- a stale readout is worse than no readout.
+  relayBase = /\/relay\//.test(url) ? url.replace(/\/live\.m3u8.*$/, '') : '';
+  if (!relayBase){
+    const pb = $('#pillBuf');
+    if (pb){ pb.textContent = '-'; pb.style.display = 'none'; }
+    relayPort = 0;
+  }
   attachAt = Date.now();
   if (hls){ hls.destroy(); hls = null; }
   if (shakaPlayer){ try { shakaPlayer.destroy(); } catch(e){} shakaPlayer = null; }
@@ -845,6 +1001,22 @@ async function pollStats(){  for (let i = 0; i < 80; i++){
   }
 }
 
+// The resolution pill reports the picture, not the ladder's opinion of it. A
+// rendition labelled 1920x1080 @ 10 Mbps can hand over segments that decode at
+// 1280x720 (measured on the inline family: declared 1080p, real 720p at 10 Mbps),
+// and a bar that repeats the label is how "there is no 1080p?" becomes unanswerable.
+// v.videoWidth is the decoder's own answer, so that is what goes on screen.
+setInterval(() => {
+  const q = $('#pillQ');
+  if (!q || !v.videoWidth || !v.videoHeight) return;
+  const want = v.videoWidth + 'x' + v.videoHeight;
+  if (q.textContent !== want){
+    q.textContent = want;
+    q.className = 'pill good';
+    q.style.display = '';
+  }
+}, 3000);
+
 // distance from the live edge, straight from hls.js: this is the number to watch
 // if "it feels delayed" -- 7-15 s is the honest floor on 6 s segments
 setInterval(() => {
@@ -868,7 +1040,12 @@ setInterval(() => {
   const target = lowMode ? DELAY.low : DELAY.normal;
   const lat = hls.latency;
   if (typeof lat !== 'number' || !isFinite(lat)) return;
-  const ceiling = dvrHold ? Math.max(target * 6 + 4, dvrSeconds - 12) : target * 6 + 4;
+  // A TV gets a much wider ceiling. The inline family's window jumps forward in
+  // ~30 s bursts; a hard seek into each burst flushes the hardware decoder and lands
+  // mid-scene, which is the "it jumped again" feeling. The playback-rate nudge above
+  // handles normal drift, so the seek is only for a playhead that is really gone.
+  const slack = (typeof TV !== 'undefined' && TV) ? 60 : 4;
+  const ceiling = dvrHold ? Math.max(target * 6 + slack, dvrSeconds - 12) : target * 6 + slack;
   if (lat > ceiling && typeof hls.liveSyncPosition === 'number'){
     try { v.currentTime = hls.liveSyncPosition; } catch(e){}
   }
@@ -1889,6 +2066,540 @@ addEventListener('keydown', function(e){
   else if (k === 'm'){ e.preventDefault(); v.muted = !v.muted; hideUnmute(); toast(v.muted ? 'muted' : 'sound on', 1400); }
   else if (k === 'r' && lastChannel){ e.preventDefault(); playChannel(lastChannel); }
 });
+
+// ---------- Fire TV / Android TV: a TV interface ----------
+// The TV build answers Hub.tv() === true (?tv=1 turns it on in a desktop browser
+// for testing with the arrow keys and Enter). Same engine as NBA Hub's TV build.
+//
+// Browse screen: a date bar, then rows of cards (tonight's games, NFL TV).
+//   up/down between rows, left/right along a row, OK plays the card full screen.
+// Watching: the picture alone -- the browse screen fades out and the player is
+//   100vw x 100vh. Any arrow or OK brings up the info bar (sound, go live, low
+//   delay, reload, frozen?, stop), Play/Pause pauses, Rew/FF jump 10 s.
+// Back: while watching, stops the stream and returns to the browse screen;
+//   on the browse screen, leaves the app.
+const TV = (IN_APP && !!(window.Hub && Hub.tv && Hub.tv())) ||
+           new URLSearchParams(location.search).get('tv') === '1';
+if (TV) (function(){
+  const body = document.body;
+  body.classList.add('tv');
+  document.documentElement.classList.add('tvroot');
+
+  // [match word, abbreviation, colour, ESPN logo slug, nickname]
+  const TEAMS = [
+    ['cardinals','ARI','#97233F','ari','Cardinals'],['falcons','ATL','#A71930','atl','Falcons'],
+    ['ravens','BAL','#241773','bal','Ravens'],['bills','BUF','#00338D','buf','Bills'],
+    ['panthers','CAR','#0085CA','car','Panthers'],['bears','CHI','#0B162A','chi','Bears'],
+    ['bengals','CIN','#FB4F14','cin','Bengals'],['browns','CLE','#EB3300','cle','Browns'],
+    ['cowboys','DAL','#041E42','dal','Cowboys'],['broncos','DEN','#FB4F14','den','Broncos'],
+    ['lions','DET','#0076B6','det','Lions'],['packers','GB','#203731','gb','Packers'],
+    ['texans','HOU','#03202F','hou','Texans'],['colts','IND','#002C5F','ind','Colts'],
+    ['jaguars','JAX','#006778','jax','Jaguars'],['chiefs','KC','#E31837','kc','Chiefs'],
+    ['raiders','LV','#A5ACAF','lv','Raiders'],['chargers','LAC','#0080C6','lac','Chargers'],
+    ['rams','LAR','#003594','lar','Rams'],['dolphins','MIA','#008E97','mia','Dolphins'],
+    ['vikings','MIN','#4F2683','min','Vikings'],['patriots','NE','#002244','ne','Patriots'],
+    ['saints','NO','#D3BC8D','no','Saints'],['giants','NYG','#0B2265','nyg','Giants'],
+    ['jets','NYJ','#125740','nyj','Jets'],['eagles','PHI','#004C54','phi','Eagles'],
+    ['steelers','PIT','#FFB612','pit','Steelers'],['49ers','SF','#AA0000','sf','49ers'],
+    ['seahawks','SEA','#002244','sea','Seahawks'],['buccaneers','TB','#D50A0A','tb','Buccaneers'],
+    ['titans','TEN','#0C2340','ten','Titans'],['commanders','WAS','#5A1414','was','Commanders']
+  ];
+  function team(n){
+    const low = (n || '').toLowerCase();
+    for (const t of TEAMS) if (low.indexOf(t[0]) >= 0)
+      return { ab: t[1], col: t[2], nick: t[4], name: (n || '').trim(),
+               logo: 'https://a.espncdn.com/i/teamlogos/nfl/500/' + t[3] + '.png' };
+    const nm = (n || '').trim();
+    return { ab: nm.slice(0, 3).toUpperCase() || '?', col: '#2a2f38', nick: nm, name: nm, logo: '' };
+  }
+  const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  // a logo that does not load becomes the coloured badge it would have been
+  function logoHtml(t){
+    const badge = '<b class="tvbadge" style="background:' + t.col + '">' + esc(t.ab) + '</b>';
+    return t.logo ? '<img class="tvlogoimg" alt="" src="' + t.logo + '" data-ab="' + esc(t.ab) + '" data-col="' + t.col + '">' : badge;
+  }
+  function wireLogos(el){
+    Array.from(el.querySelectorAll('img.tvlogoimg')).forEach(i => {
+      i.onerror = function(){
+        const b = document.createElement('b');
+        b.className = 'tvbadge'; b.style.background = this.getAttribute('data-col');
+        b.textContent = this.getAttribute('data-ab');
+        this.parentNode.replaceChild(b, this);
+      };
+    });
+  }
+
+  const root = document.createElement('div');
+  root.id = 'tv';
+  root.innerHTML =
+    '<div id="tvBrowse">' +
+      '<div id="tvBg"><div id="tvGlowA"></div><div id="tvGlowB"></div><div id="tvField"></div><div id="tvVignette"></div></div>' +
+      '<div id="tvHead"><div id="tvBrand"><i></i>NFL Hub</div>' +
+        '<div id="tvDate"><button class="tvbtn arrow" data-act="prev">&#8249;</button>' +
+        '<button class="tvbtn" id="tvDay" data-act="today">Today<small></small></button>' +
+        '<button class="tvbtn arrow" data-act="next">&#8250;</button></div>' +
+        '<div id="tvClock"></div></div>' +
+      '<div id="tvNow"></div>' +
+      '<div id="tvRows"><div id="tvRowsIn"></div></div>' +
+      '<div id="tvFoot"><span><b>OK</b> play full screen</span><span><b>&#9650;&#9660;</b> rows</span>' +
+        '<span><b>Back</b> exit</span><span><b>&#8801;</b> diagnostics</span></div>' +
+    '</div>' +
+    '<div id="tvOsd"><div id="tvOsdTitle"></div><div id="tvOsdStat"></div><div id="tvOsdBtns">' +
+      '<button class="tvbtn" data-osd="snd">Sound</button>' +
+      '<button class="tvbtn" data-osd="live">Go live</button>' +
+      '<button class="tvbtn" data-osd="low">Low delay</button>' +
+      '<button class="tvbtn" data-osd="reload">Reload stream</button>' +
+      '<button class="tvbtn" data-osd="frozen">Frozen?</button>' +
+      '<button class="tvbtn" data-osd="stop">Stop</button>' +
+    '</div></div>' +
+    '<div id="tvHint"></div>';
+  document.body.appendChild(root);
+  const pfEl = $('#pf'); if (pfEl) pfEl.tabIndex = -1;      // the remote stays with this page
+
+  const hint = $('#tvHint'); let hintT = null;
+  function tvHint(msg, ms){
+    hint.textContent = msg; hint.classList.add('show');
+    clearTimeout(hintT); hintT = setTimeout(() => hint.classList.remove('show'), ms || 2400);
+  }
+  setInterval(() => {
+    const d = new Date();
+    $('#tvClock').textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }, 1000);
+
+  const isPlaying = () => body.classList.contains('playing') || body.classList.contains('iframeMode');
+  const watching = () => root.classList.contains('watching');
+  const diagEl = document.getElementById('diag');
+  const diagOpen = () => diagEl && diagEl.classList.contains('show');
+
+  // ---- browse model: rows of items, a cursor (r, c), a remembered column per row
+  let rows = [];            // [{title, els:[...]}]
+  let R = 1, C = [1, 0, 0, 0], nowKey = null, nowName = '';
+  let cur = null;
+
+  function setFocus(el){
+    if (cur) cur.classList.remove('tvf');
+    cur = el;
+    if (el) el.classList.add('tvf');
+    if (el && el._info){
+      $('#tvNow').innerHTML = '<b>' + esc(el._info.title) + '</b><span>' + esc(el._info.sub) + '</span>';
+      $('#tvGlowA').style.color = el._info.ca;
+      $('#tvGlowB').style.color = el._info.cb;
+    }
+  }
+  function place(){
+    if (!rows.length) return;
+    R = Math.max(0, Math.min(R, rows.length - 1));
+    const row = rows[R];
+    const c = Math.max(0, Math.min(C[R] || 0, row.els.length - 1));
+    C[R] = c;
+    setFocus(row.els[c]);
+    // keep the focused card in view: strips slide sideways, the rows slide up
+    if (row.strip){
+      const card = row.els[c];
+      const pad = parseFloat(getComputedStyle(row.strip).paddingLeft) || 0;
+      const x = Math.max(0, card.offsetLeft + card.offsetWidth + pad * 1.5 - window.innerWidth);
+      row.strip.style.transform = 'translateX(' + (-x) + 'px)';
+    }
+    const inner = $('#tvRowsIn');
+    if (R === 0) inner.style.transform = 'translateY(0)';
+    else if (row.box){
+      const avail = $('#tvRows').clientHeight;
+      const need = row.box.offsetTop + row.box.offsetHeight - avail;
+      inner.style.transform = 'translateY(' + (-Math.max(0, need)) + 'px)';
+    }
+  }
+
+  function card(cls, html, act, key){
+    const b = document.createElement('div');
+    b.className = 'tvcard ' + cls; b.innerHTML = html; b._act = act; b._key = key;
+    return b;
+  }
+
+  function build(){
+    const L = labelFor(curDate || todayISO());
+    $('#tvDay').innerHTML = esc(L.head) + '<small>' + esc(L.sub) + '</small>';
+    const head = Array.from(root.querySelectorAll('#tvDate .tvbtn'));
+    head.forEach(b => b._act = b.getAttribute('data-act'));
+    const inner = $('#tvRowsIn'); inner.innerHTML = '';
+    const next = [{ title: 'date', els: head }];
+
+    // games: live first, then the ones that open later, finals last
+    const gbox = document.createElement('div'); gbox.className = 'tvrow';
+    const live = games.filter(g => g.state === 'in').length;
+    gbox.innerHTML = '<h2>' + (L.head === 'Today' ? "Today's games" : 'Games · ' + esc(L.head) + ' ' + esc(L.sub)) +
+      '<span>' + games.length + (live ? ' · ' + live + ' live' : '') + '</span></h2>';
+    const gs = document.createElement('div'); gs.className = 'tvstrip'; gbox.appendChild(gs);
+    const gels = [];
+    const order = g => g.state === 'in' ? 0 : g.state === 'post' ? 2 : 1;
+    games.slice().sort((a, b) => order(a) - order(b)).forEach(g => {
+      const parts = String(g.name).split(/\s+(?:vs\.?|@|at)\s+/i);
+      const a = team(parts[0]), h = team(parts[1] || '');
+      const key = 'g:' + g.name;
+      let chip;
+      if (key === nowKey) chip = '<span class="tvchip now">WATCHING</span>';
+      else if (g.state === 'in') chip = '<span class="tvchip live">LIVE</span>';
+      else if (g.state === 'post') chip = '<span class="tvchip">FINAL</span>';
+      else if (g.stream === false) chip = '<span class="tvchip">NO FEED YET</span>';
+      else chip = '<span class="tvchip">' + esc(g.time || 'later') + '</span>';
+      const meta = g.state === 'in' ? 'live now' : g.state === 'post' ? 'game over'
+                 : (g.stream === false ? 'check back at kickoff' : 'feed opens at kickoff');
+      const tint = 'background:linear-gradient(115deg,' + a.col + '66 0%,#161920f0 42%,#161920f0 58%,' + h.col + '66 100%) !important';
+      const el = card('game' + ((g.state === 'post' || g.stream === false) ? ' dim' : ''),
+        '<div class="tvmatch">' +
+          '<div class="tvside">' + logoHtml(a) + '<div class="tvnick">' + esc(a.nick) + '</div></div>' +
+          '<div class="tvvs">' + (parts[1] ? 'VS' : '') + '</div>' +
+          (parts[1] ? '<div class="tvside">' + logoHtml(h) + '<div class="tvnick">' + esc(h.nick) + '</div></div>' : '<div class="tvside"></div>') +
+        '</div><div class="tvmeta">' + chip + '<span>' + esc(meta) + '</span></div>',
+        () => {
+          if (g.state === 'post'){ tvHint('That game is over.'); return; }
+          if (g.stream === false){ tvHint('No feed listed for this game yet.'); return; }
+          startWatching(key, g.name);
+          watchGame(g);
+        }, key);
+      el.setAttribute('style', tint);
+      el._info = { title: g.name, sub: ((g.time || '') + (meta ? ' · ' + meta : '')).replace(/^ · /, ''),
+                   ca: a.col, cb: h.col };
+      wireLogos(el);
+      gs.appendChild(el); gels.push(el);
+    });
+    if (!games.length){
+      const nd = (dates || []).filter(d => d > curDate)[0];
+      gs.appendChild(card('info', '<div class="t1">No NFL games on this day</div><div class="t2">' +
+        (nd ? 'OK: jump to the next game day, ' + esc(nd) : 'use the arrows at the top to change the day') + '</div>',
+        () => { if (nd){ curDate = nd; loadGames(); } }, 'empty'));
+      gels.push(gs.lastChild);
+    }
+    inner.appendChild(gbox);
+    next.push({ title: 'games', els: gels, strip: gs, box: gbox });
+
+    // channels
+    if (channels.length){
+      const cbox = document.createElement('div'); cbox.className = 'tvrow';
+      cbox.innerHTML = '<h2>NFL TV<span>always on · buffered on this TV</span></h2>';
+      const cs = document.createElement('div'); cs.className = 'tvstrip'; cbox.appendChild(cs);
+      const cels = [];
+      channels.forEach(ch => {
+        const key = 'c:' + ch.name;
+        const el = card('chan', '<div class="tvlogo">NFL<em>TV</em></div><div class="tvname">' + esc(ch.name) + '</div>' +
+          '<div class="tvmeta">' + (key === nowKey ? '<span class="tvchip now">WATCHING</span>' : '<span class="tvchip hd">LIVE</span>') +
+          '<span>live channel</span></div>',
+          () => { startWatching(key, ch.name); playChannel(ch); }, key);
+        el._info = { title: ch.name, sub: 'NFL TV · live 24/7 · buffered locally', ca: '#3ddc84', cb: '#1f7a4c' };
+        cs.appendChild(el); cels.push(el);
+      });
+      inner.appendChild(cbox);
+      next.push({ title: 'channels', els: cels, strip: cs, box: cbox });
+    }
+
+    // keep the cursor on the same card across rebuilds
+    const keyWas = cur && cur._key;
+    rows = next;
+    if (keyWas){
+      rows.forEach((rw, ri) => rw.els.forEach((e, ci) => { if (e._key === keyWas){ R = ri; C[ri] = ci; } }));
+    }
+    if (!watching() && !diagOpen()) place();
+  }
+
+  // ---- the picture must not die on its own
+  // Measured on the Fire TV: a live game ran, then the decoder sat on one frame
+  // while hls.js kept buffering -- the element thought it was playing, and nothing
+  // on screen said otherwise. A TV is left alone for an hour at a time, so it gets
+  // a watchdog: a playhead that stops moving is nudged to the live edge, and a
+  // second stall soon after is a dead feed and gets rebuilt. Reloading is the one
+  // thing a viewer would do with the remote anyway.
+  let wdPos = -1, wdStuck = 0, wdLastReload = 0, wdPokes = 0;
+  setInterval(function(){
+    if (!body.classList.contains('playing') || v.paused || v.seeking){
+      wdPos = -1; wdStuck = 0; return;
+    }
+    const t = v.currentTime;
+    if (wdPos >= 0 && Math.abs(t - wdPos) < 0.3){
+      wdStuck++;
+      if (wdStuck === 1 && Date.now() - wdLastReload > 45000){
+        // first stall: snap the playhead forward, which is what "go live" does.
+        // 45 s of quiet after a poke: a picture that is merely slow must not be
+        // shoved twice in a row, because each shove is a visible scene change.
+        wdPokes++;
+        wdLastReload = Date.now();
+        let moved = false;
+        try {
+          if (hls && typeof hls.liveSyncPosition === 'number' && isFinite(hls.liveSyncPosition)){
+            v.currentTime = hls.liveSyncPosition; moved = true;
+          }
+        } catch(e){}
+        if (!moved){ try { const p = v.play(); if (p && p.catch) p.catch(function(){}); } catch(e){} }
+        tvHint('picture stalled - jumping back to live', 2400);
+      } else if (wdStuck >= 3 && Date.now() - wdLastReload > 30000){
+        // stalled again within a minute: that feed is not coming back by itself
+        wdLastReload = Date.now(); wdStuck = 0;
+        tvHint('picture stalled - reloading the stream', 2800);
+        try {
+          if (body.classList.contains('iframeMode')) $('#reloadStream').click();
+          else if (lastChannel) playChannel(lastChannel);
+          else if (pol.game) watchGame(pol.game);
+        } catch(e){}
+      }
+    } else {
+      wdStuck = 0;
+    }
+    wdPos = t;
+  }, 6000);
+
+  // ---- diagnostics on the shell's log, so a stall leaves a trace to read
+  let dbgN = 0;
+  setInterval(function(){
+    if (!body.classList.contains('playing')) return;
+    try {
+      console.log('tvpos ct=' + v.currentTime.toFixed(1) + ' rs=' + v.readyState +
+        ' lat=' + (hls && hls.latency != null ? hls.latency.toFixed(1) : '-') +
+        ' pokes=' + wdPokes + ' stalls=' + wdStuck);
+    } catch(e){}
+    dbgN++;
+  }, 20000);
+
+  // ---- watching
+  let osdT = null;
+  function startWatching(key, name){
+    nowKey = key; nowName = name;
+    root.classList.add('watching');
+    setFocus(null);
+    showOsd(false);
+    tvHint('starting ' + name + '…', 2600);
+    // the picture is the screen: our own fullscreen too, so the app's chrome and
+    // the bar stay out of the way on top of the TV layout
+    if (!fsActive()) { try { tellAppFullscreen(true); } catch(e){} }
+    try { fsUiWake(); } catch(e){}
+  }
+  function showBrowse(){
+    root.classList.remove('watching', 'osd');
+    build();
+  }
+  // stop everything that plays: our player, the game frame, the stream policy
+  function tvStop(){
+    try { v.pause(); v.removeAttribute('src'); v.load(); } catch(e){}
+    const f = $('#pf'); if (f){ f.style.display = 'none'; f.removeAttribute('src'); }
+    if (pol.timer){ clearInterval(pol.timer); pol.timer = null; pol.game = null; }
+    if (hls){ try { hls.destroy(); } catch(e){} hls = null; }
+    body.classList.remove('playing', 'iframeMode');
+    setSpin(false);
+    hideUnmute();
+    lastChannel = null; nowKey = null; nowName = '';
+    const nt = $('#nowTitle'); if (nt) nt.textContent = 'nothing playing';
+    ['#pillQ','#pillBuf','#pillLat','#pillSrc'].forEach(id => {
+      const e = $(id); if (e){ e.style.display = 'none'; e.textContent = '-'; }
+    });
+    showBrowse();
+  }
+  function osdButtons(){ return Array.from(root.querySelectorAll('#tvOsdBtns .tvbtn')); }
+  let osdC = 0;
+  function showOsd(focus){
+    root.classList.add('osd');
+    refreshOsd();
+    if (focus !== false){ osdC = Math.min(osdC, osdButtons().length - 1); setFocus(osdButtons()[osdC]); }
+    clearTimeout(osdT);
+    osdT = setTimeout(hideOsd, 6000);
+  }
+  function hideOsd(){ root.classList.remove('osd'); clearTimeout(osdT); if (watching()) setFocus(null); }
+  const osdOn = () => root.classList.contains('osd');
+  function refreshOsd(){
+    $('#tvOsdTitle').textContent = nowName || ($('#nowTitle') ? $('#nowTitle').textContent : '');
+    const pills = ['#pillQ', '#pillBuf', '#pillLat', '#pillSrc'].map(id => $(id))
+      .filter(e => e && e.style.display !== 'none' && e.textContent.trim() && e.textContent.trim() !== '-');
+    $('#tvOsdStat').innerHTML = pills.map(e => '<span class="' + (e.classList.contains('good') ? 'g' : '') + '">' + esc(e.textContent) + '</span>').join('') +
+      (body.classList.contains('playing') ? '<span>' + (v.paused ? 'paused' : v.muted ? 'muted' : 'sound on') + '</span>' : '');
+    const snd = root.querySelector('[data-osd=snd]');
+    if (snd) snd.textContent = v.muted ? 'Sound on' : 'Mute';
+    const low = root.querySelector('[data-osd=low]');
+    if (low) low.textContent = lowMode ? 'Low delay: on' : 'Low delay: off';
+  }
+  setInterval(() => { if (osdOn()) refreshOsd(); }, 1000);
+  function osdAct(k){
+    if (k === 'snd'){ if (v.muted) soundOn(); else soundOff(); }
+    else if (k === 'live') seekLive();
+    else if (k === 'low') $('#low').click();
+    else if (k === 'reload'){ if (body.classList.contains('iframeMode')) $('#reloadStream').click(); else if (lastChannel) playChannel(lastChannel); else tvHint('nothing to reload'); }
+    else if (k === 'frozen') $('#freezeBtn').click();
+    else if (k === 'stop'){ tvStop(); return; }
+    refreshOsd();
+    showOsd();
+  }
+
+  // ---- keys
+  // Two ways in, one body. A Fire TV's WebView does not hand D-pad keys to the
+  // page -- it eats them for its own focus traversal, which is why OK did nothing
+  // on the first Fire TV run -- so the shell names every key and calls tvKey().
+  // window.__nflTvShell is set by the shell when that is the case, and the raw
+  // keydown listener below steps aside so nothing moves twice. It still runs for
+  // a desktop browser opened with ?tv=1, which is how this screen is tested.
+  function remoteKey(k){
+    const dir = k === 'up' || k === 'down' || k === 'left' || k === 'right' ? k : null;
+    const ok = k === 'ok';
+    if (!dir && !ok) return false;
+    if (diagOpen()){ if (ok) diagEl.classList.remove('show'); return true; }
+
+    if (watching()){
+      if (!osdOn()){
+        if (ok && v.muted && body.classList.contains('playing')){ soundOn(); tvHint('sound on', 1200); }
+        showOsd();
+        return true;
+      }
+      const bs = osdButtons();
+      if (dir === 'left') osdC = Math.max(0, osdC - 1);
+      else if (dir === 'right') osdC = Math.min(bs.length - 1, osdC + 1);
+      else if (dir === 'up'){ hideOsd(); return true; }
+      else if (dir === 'down'){ showOsd(); return true; }
+      else if (ok){ osdAct(bs[osdC].getAttribute('data-osd')); return true; }
+      showOsd();
+      return true;
+    }
+
+    if (!rows.length) build();
+    if (dir === 'up'){ if (R > 0){ R--; place(); } }
+    else if (dir === 'down'){ if (R < rows.length - 1){ R++; place(); } }
+    else if (dir === 'left'){ if ((C[R] || 0) > 0){ C[R]--; place(); } }
+    else if (dir === 'right'){ if ((C[R] || 0) < rows[R].els.length - 1){ C[R]++; place(); } }
+    else if (ok && cur){
+      const a = cur._act;
+      if (a === 'prev') shiftDay(-1);
+      else if (a === 'next') shiftDay(1);
+      else if (a === 'today'){ if (curDate !== todayISO()){ curDate = todayISO(); loadGames(); } }
+      else if (typeof a === 'function'){
+        // the card already playing: just go back to it
+        if (cur._key && cur._key === nowKey && isPlaying()){ root.classList.add('watching'); setFocus(null); showOsd(false); return true; }
+        a();
+      }
+    }
+    return true;
+  }
+
+  addEventListener('keydown', function(ev){
+    if (window.__nflTvShell) return;                    // the shell is driving (see above)
+    const k = ev.key, kc = ev.keyCode;
+    const dir = k === 'ArrowUp' || kc === 19 ? 'up' : k === 'ArrowDown' || kc === 20 ? 'down'
+              : k === 'ArrowLeft' || kc === 21 ? 'left' : k === 'ArrowRight' || kc === 22 ? 'right' : null;
+    const ok = k === 'Enter' || kc === 13 || kc === 23;
+    const back = k === 'Escape' && !IN_APP;          // desktop testing only; the app sends Back itself
+    if (!dir && !ok && !back) return;
+    ev.preventDefault(); ev.stopPropagation();
+    if (back){ window.tvBack(); return; }
+    remoteKey(ok ? 'ok' : dir);
+  }, true);
+
+  // the list is rebuilt on every refresh / day change: rebuild the cards with it
+  const _render = render;
+  render = function(){ _render.apply(this, arguments); try { build(); } catch(e){ console.log('tv build: ' + e); } };
+  const searchEl = $('#search'); if (searchEl) searchEl.oninput = render;
+  if (diagEl) new MutationObserver(function(){
+    if (diagOpen()){ setFocus(diagEl.querySelector('.close')); }
+    else if (watching()) setFocus(osdOn() ? osdButtons()[osdC] : null);
+    else place();
+  }).observe(diagEl, { attributes: true, attributeFilter: ['class'] });
+
+  // the shell hands every remote key over by name; 'done' means "the page
+  // consumed it" (the <video>s live in here, so the shell must not go looking
+  // for another one)
+  window.tvKey = function(k){
+    if (k === 'menu'){ if (diagOpen()) diagEl.classList.remove('show'); else diag(); return 'done'; }
+    // a game that plays in #pf is the site's player, not ours: it has no focus
+    // ring, so arrows and OK become clicks on it (tvShot)
+    if (body.classList.contains('iframeMode')){
+      try { if (window.tvShot) window.tvShot(k); } catch(e){}
+      return 'done';
+    }
+    if (remoteKey(k)) return 'done';
+    if (!body.classList.contains('playing')) return null;
+    try {
+      if (k === 'play' || (k === 'playpause' && v.paused)){ v.muted = false; const p = v.play(); if (p && p.catch) p.catch(() => {}); hideUnmute(); soundState(); tvHint('▶  play', 1000); }
+      else if (k === 'pause' || k === 'playpause'){ v.pause(); tvHint('❚❚  paused', 1600); }
+      else if (k === 'rewind' || k === 'forward'){
+        v.currentTime = Math.max(0, v.currentTime + (k === 'forward' ? 10 : -10));
+        tvHint(k === 'forward' ? '10 s »' : '« 10 s', 1000);
+      }
+    } catch(e){}
+    return 'done';
+  };
+  // Back, asked by the shell: true = handled here, false = leave the app
+  window.tvBack = function(){
+    if (diagOpen()){ diagEl.classList.remove('show'); return true; }
+    if (watching() || isPlaying()){ tvStop(); return true; }
+    return false;
+  };
+  // The whole remote, offered to the shell as one keyed dispatcher: a game opened
+  // by the resolver is a page we did not write, and its buttons cannot be reached
+  // with a D-pad. The shell hands arrow keys here while a game is showing, and this
+  // turns them into real mouse clicks on whatever the page centred.
+  window.tvShot = function(k){ return tvShot(k); };
+  function tvShot(k){
+    const X = function(){
+      const out = [];
+      document.querySelectorAll('#pf').forEach(function(fr){
+        try { out.push.apply(out, fr.contentDocument.querySelectorAll('button,[role=button],a,div,span')); } catch(e){}
+      });
+      return out;
+    };
+    const vis = function(el){
+      const r = el.getBoundingClientRect();
+      return r.width > 30 && r.height > 12 && r.width < window.innerWidth * 0.95;
+    };
+    const mid = function(el){ const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+    const hit = function(el){
+      const m = mid(el);
+      try {
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: m.x, clientY: m.y }));
+        el.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, clientX: m.x, clientY: m.y }));
+        el.click();
+      } catch(e){}
+    };
+    if (tvShot.count === undefined) tvShot.count = 0;
+    const els = X().filter(vis);
+    if (!els.length || k === 'ok'){
+      // prefer a thing that says play; else the biggest clickable near the middle
+      let best = null, bestScore = -1;
+      els.forEach(function(el){
+        const t = (el.textContent || '').toLowerCase();
+        const r = el.getBoundingClientRect();
+        let s = 0;
+        if (/play|watch|main|live|start/.test(t)) s += 60;
+        if (/close|skip|ad|×|subscribe|login/.test(t)) s -= 60;
+        s += (1 - Math.abs(mid(el).x - window.innerWidth / 2) / window.innerWidth) * 30;
+        s += Math.min(r.width, 300) / 20;
+        if (s > bestScore){ bestScore = s; best = el; }
+      });
+      if (best){ hit(best); tvHint('clicked it', 1200); return 'done'; }
+      tvShot.count++;
+      const fr = document.querySelector('#pf');
+      if (fr){ try { fr.focus(); } catch(e){} }
+      tvHint('the player has it - try OK / arrows again', 2000);
+      return 'done';
+    }
+    return null;
+  }
+  // A game page cannot lay out at 0x0. On a TV the WebView's viewport is 960x540
+  // CSS px, and some player wrappers size themselves off the body instead of the
+  // viewport: the player iframe measured 0x0 and the picture had no box to paint
+  // in (first measured on a Fire TV Stick 4K).
+  function sizeTheDocument(){
+    try {
+      document.documentElement.style.cssText += ';width:100vw !important;height:100vh !important;margin:0;';
+      document.body.style.cssText += ';margin:0 !important;width:100vw !important;min-height:100vh !important;';
+    } catch(e){}
+  }
+  sizeTheDocument();
+  window.addEventListener('DOMContentLoaded', sizeTheDocument);
+  window.addEventListener('load', sizeTheDocument);
+  setInterval(function(){
+    const f = document.querySelector('.player-embed-wrap iframe, iframe#pf, body > iframe');
+    if (!f) return;
+    const r = f.getBoundingClientRect();
+    if (r.width < 320 || r.height < 180){
+      document.documentElement.style.width = '100vw';
+      document.documentElement.style.height = '100vh';
+      document.body.style.width = '100vw';
+      document.body.style.minHeight = '100vh';
+    }
+  }, 1500);
+  build();
+})();
 
 boot();
 </script>

@@ -1,5 +1,7 @@
 # build.ps1 -- builds NFLHub.apk with the SDK tools directly (no Gradle).
-#   powershell -ExecutionPolicy Bypass -File build.ps1
+#   powershell -ExecutionPolicy Bypass -File build.ps1        phone  -> NFLHub.apk
+#   powershell -ExecutionPolicy Bypass -File build.ps1 -Tv    Fire TV -> NFLHub-TV.apk
+param([switch]$Tv)
 $ErrorActionPreference = 'Continue'   # native tools write to stderr; check $LASTEXITCODE instead
 
 $root = $PSScriptRoot
@@ -18,6 +20,13 @@ $plat = @(Get-ChildItem (Join-Path $sdk 'platforms') -Directory -ErrorAction Sil
           Sort-Object Name -Descending | Select-Object -First 1)
 $jar  = if ($plat) { Join-Path $plat[0].FullName 'android.jar' } else { Join-Path $sdk 'platforms\android-35\android.jar' }
 $out  = Join-Path $root 'build'
+# The TV build is the same code with its own manifest (TV launcher, banner, no
+# touchscreen) and its own package name, so it never collides with the phone app.
+$manifest = if ($Tv) { Join-Path $root 'tv\AndroidManifest.xml' } else { Join-Path $root 'AndroidManifest.xml' }
+$apkName  = if ($Tv) { 'NFLHub-TV.apk' } else { 'NFLHub.apk' }
+$rename   = if ($Tv) { @('--rename-manifest-package', 'com.nflds.tv') } else { @() }
+$vcode    = 14
+$vname    = '1.4'
 
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 Get-ChildItem $out -Recurse -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -35,10 +44,10 @@ if ($LASTEXITCODE -ne 0) { throw 'aapt2 compile failed' }
 
 Write-Host '[2/6] linking resources + manifest' -ForegroundColor Cyan
 & "$bt\aapt2.exe" link -o "$out\base.apk" -I $jar `
-    --manifest "$root\AndroidManifest.xml" -R "$out\res.zip" -A "$out\assets" `
+    --manifest $manifest -R "$out\res.zip" -A "$out\assets" `
     --java "$out\gen" --auto-add-overlay `
     --min-sdk-version 24 --target-sdk-version 34 `
-    --version-code 1 --version-name 1.0
+    --version-code $vcode --version-name $vname @rename
 if ($LASTEXITCODE -ne 0) { throw 'aapt2 link failed' }
 
 Write-Host '[3/6] compiling java' -ForegroundColor Cyan
@@ -74,10 +83,10 @@ if (-not (Test-Path $ks)) {
 if ($LASTEXITCODE -ne 0) { throw 'zipalign failed' }
 
 & "$bt\apksigner.bat" sign --ks $ks --ks-pass pass:android --key-pass pass:android `
-    --out (Join-Path $root 'NFLHub.apk') "$out\aligned.apk"
+    --out (Join-Path $root $apkName) "$out\aligned.apk"
 if ($LASTEXITCODE -ne 0) { throw 'apksigner failed' }
 
-& "$bt\apksigner.bat" verify --print-certs (Join-Path $root 'NFLHub.apk') | Out-Null
+& "$bt\apksigner.bat" verify --print-certs (Join-Path $root $apkName) | Out-Null
 Write-Host ''
-Write-Host ('OK -> ' + (Join-Path $root 'NFLHub.apk')) -ForegroundColor Green
-Write-Host ('size  ' + [math]::Round((Get-Item (Join-Path $root 'NFLHub.apk')).Length/1KB) + ' KB')
+Write-Host ('OK -> ' + (Join-Path $root $apkName)) -ForegroundColor Green
+Write-Host ('size  ' + [math]::Round((Get-Item (Join-Path $root $apkName)).Length/1KB) + ' KB')
