@@ -96,6 +96,47 @@ adb shell input keyevent 23            # OK on the first card (live games sort f
 adb shell screencap -p /sdcard/tv.png
 ```
 
+## Where the 1080p game feeds actually are
+
+They are in the same place the NBA hub found them: the mirror's own signed ladder, not the
+broadcast relay we were playing. On 2026-11-22, Jaguars–Giants on `methstreams.st` handed over
+
+```text
+https://tims-001.servehttp.com/main/secure/<sha256>/<epoch>/nfl-401873069.m3u8
+#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=8780000,BANDWIDTH=10980000,RESOLUTION=1920x1080,
+                   FRAME-RATE=59.940,CODECS="avc1.64002a,mp4a.40.2"
+ -> nfl-401873069_1080p.m3u8      #EXT-X-MEDIA-SEQUENCE:20732, 6.006 s segments
+```
+
+measured with a decoder on the first segment: **1920x1080 h264 High@4.2, 59.94 fps, AAC 48 kHz
+stereo, 6 MB per 6 s segment, `#EXT-X-KEY` absent (clear, no Widevine), no discontinuities**.
+It answers a plain GET with **no Referer**. That is the broadcast feed (1080p59.94), the same
+class of thing NBA Hub got from `tims-001.sytes.net/.../nba-<id>.m3u8`.
+
+Availability is per game, not per site — the same night, Raiders–Broncos on the same mirror
+only published
+
+```text
+.../nfl-401873075.m3u8 -> nfl-401873075_720p.m3u8   RESOLUTION=1280x720, 4.79 Mbps
+```
+
+so a resolver that takes the first link that yields *something* ends up on 720p while a 1080p
+ladder sits on another `Main N` link of the same event page.
+
+`tools/harvest_mirror.py` reproduces this: it drives Chrome down event → `/main/N` → embed with
+ad hosts blocked, records every `.m3u8` the player asks for, fetches each one plainly, and decodes
+the top rung's first segment.
+
+```powershell
+python tools\harvest_mirror.py https://methstreams.st/event/m-jacksonville-jaguars-vs-new-york-giants-1122 --mains 3
+```
+
+**What the app does not do yet, and what it would take:** prefer the candidate whose master
+declares (and delivers) 1920x1080 instead of the first one that plays, and re-harvest when a
+tokenised `/main/secure/...` URL starts answering 404 — those epochs rotate every few minutes, so
+a cached manifest is good for one session only (the relay's current behaviour is to retry the same
+404 until it gives up, which is exactly how a 1080p game "stopped working").
+
 ## 1080p, measured rather than labelled
 
 The ladder's `RESOLUTION=` lines are not evidence. On a live game this mirror family
