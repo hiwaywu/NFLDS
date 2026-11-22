@@ -1,8 +1,15 @@
 # evaluate a JS expression inside the app's WebView over the DevTools WS protocol
+#
+#   powershell -File devtools_eval.ps1 -Expression 'v.videoHeight' [-Port 9222]
+#   powershell -File devtools_eval.ps1 -ExpressionFile probe.js
+#
+# When the app is running its invisible sniffer engine there is more than one page
+# target, and the first one is the engine's, not the hub's: pick the hub by URL.
 param(
     [string]$Expression,
     [string]$ExpressionFile,
     [string]$Port = '9222',
+    [string]$UrlLike = '127.0.0.1:8795',
     [int]$TimeoutSec = 90
 )
 if ($ExpressionFile -and (Test-Path $ExpressionFile)) {
@@ -11,7 +18,10 @@ if ($ExpressionFile -and (Test-Path $ExpressionFile)) {
 if (-not $Expression) { throw 'no expression given' }
 $ErrorActionPreference = 'Stop'
 $targets = (Invoke-WebRequest -Uri "http://127.0.0.1:$Port/json" -UseBasicParsing -TimeoutSec 8).Content | ConvertFrom-Json
-$page = $targets | Where-Object { $_.type -eq 'page' } | Select-Object -First 1
+$page = $targets | Where-Object { $_.type -eq 'page' -and $_.url -like "*$UrlLike*" } | Select-Object -First 1
+if (-not $page -and $UrlLike) {
+    $page = $targets | Where-Object { $_.type -eq 'page' } | Select-Object -First 1
+}
 if (-not $page) { throw 'no page target' }
 $wsUrl = $page.webSocketDebuggerUrl -replace '^(ws://[^:]+):\d+/', "ws://127.0.0.1:$Port/"
 

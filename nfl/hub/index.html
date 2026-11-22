@@ -1490,6 +1490,249 @@ function sniffStream(u, referer){
   });
 }
 
+// ---------------------------------------------------------------- best picture, not first picture
+// The mirror hands one event page several `Main N` links, and they are not equal:
+// on 2026-11-22 Jaguars-Giants published a real 1920x1080@59.94 ladder on one link
+// (tims-001 `/main/secure/..._1080p.m3u8`, clear HLS) while the inline family on
+// another link topped out at a 10 Mbps rung that decodes at 1280x720. "The first
+// link that plays" therefore means "the worst picture that works", so every link is
+// resolved, every master is read, and the ladder with the highest rung wins -- with
+// the decoder as the last word once a candidate is actually on screen.
+const pickCache = {};        // game url -> the candidate that measured best
+// Off until the relay can pull the mirror's token CDN (see the note in watchGame).
+const SHARP_HUNT = false;
+
+/** The best rung a master or media playlist advertises. */
+function topOfLadder(text){
+  let best = { w: 0, h: 0, bw: 0 };
+  const rx = /#EXT-X-STREAM-INF:([^\r\n]*)/g;
+  let m;
+  while ((m = rx.exec(text || ''))){
+    const r = /RESOLUTION=(\d+)x(\d+)/.exec(m[1]);
+    const b = /BANDWIDTH=(\d+)/.exec(m[1]);
+    const w = r ? +r[1] : 0, h = r ? +r[2] : 0, bw = b ? +b[1] : 0;
+    if (h > best.h || (h === best.h && bw > best.bw)) best = { w: w, h: h, bw: bw };
+  }
+  return best;
+}
+
+/** A playlist's text, under the identity the CDN will accept.
+ *
+ *  The token ladders (`/main/secure/...`, `*.indianservers.st/secure/...`) answer a
+ *  plain GET and *reject* the player page we sniffed them from: sending that Referer
+ *  is how a perfectly good 1080p master came back as "not a playlist" and got thrown
+ *  away. Try the sniffed Referer first -- some hosts do want it -- then none, and
+ *  remember which one worked so the relay is handed the same identity.
+ */
+async function playlistText(u, referer){
+  const isM3u = t => typeof t === 'string' && t.replace(/^\uFEFF/, '').trim().slice(0, 7).toUpperCase() === '#EXTM3U';
+  let t = '';
+  if (referer){
+    try { t = await hubFetch(u, referer); } catch(e){}
+    if (isM3u(t)) return { text: t, referer: referer };
+  }
+  try { t = await hubFetch(u, ''); } catch(e){ t = ''; }
+  if (isM3u(t)) return { text: t, referer: '' };
+  return null;
+}
+
+/** Read a candidate's own playlist and record what it claims. */
+async function rankCandidate(c){
+  const got = await playlistText(c.m3u8, c.referer || '');
+  if (got){
+    const top = topOfLadder(got.text);
+    return Object.assign({}, c, { w: top.w, h: top.h, bw: top.bw, referer: got.referer });
+  }
+  // Some of these CDNs will not hand their playlist to the shell's fetch at all (the
+  // sniffed hit is good, the second request is not). They do name the rendition in
+  // the path, though -- `nfl-401873069_1080p.m3u8`, `..._720p.m3u8`,
+  // `..._cbs_540p/index.m3u8` -- so rank on that instead of throwing the link away.
+  const m = /(?:^|[_-])(\d{3,4})p(?:\/|[_.]|$)/i.exec(c.m3u8);
+  if (m){
+    const h = +m[1];
+    return Object.assign({}, c, { w: Math.round(h * 16 / 9), h: h, bw: 0, inferred: true });
+  }
+  return null;
+}
+
+/**
+ * Every player link of a game, resolved and ranked.
+ *
+ * Links that walk cleanly are harvested; links that hand the picture to a script
+ * (the token ladders) are caught by the app's sniffer. Each result is ranked by the
+ * top rung it advertises, highest first, and the caller plays from the top.
+ */
+async function harvestRanked(g, linksOverride){
+  let links = [];
+  try {
+    if (linksOverride && linksOverride.length) links = linksOverride.slice(0, 4);
+    else {
+      const j = await fetch('/api/resolve?u=' + encodeURIComponent(g.url)).then(r => r.json());
+      if (j && j.links && j.links.length) links = j.links.slice(0, 4);
+    }
+  } catch(e){}
+  if (!links.length) links = [g.url];
+
+  const out = [];
+  const seen = {};
+  const add = function(c){ if (c && c.m3u8 && !seen[c.m3u8]){ seen[c.m3u8] = 1; out.push(c); } };
+
+  // Fast pass only: walk every link (a plain GET per hop) and keep whatever it names,
+  // including the inline family. Sniffing is deliberately *not* done here -- each sniff
+  // blocks the renderer for several seconds, and three of them turned "press OK" into a
+  // two-minute wait. The 1080p hunt runs after the picture is up (huntSharp), where a
+  // few seconds cost nothing.
+  for (const link of links){
+    let h = null;
+    try { h = await harvestChain(g, [link]); } catch(e){}
+    if (h && h.m3u8){ h.frame = link; add(h); }
+  }
+  if (!out.length){
+    // nothing walked: one sniff on the first link, because a page that builds its
+    // player in JavaScript never names anything in its HTML
+    for (const link of links.slice(0, 2)){
+      try {
+        const s = await sniffStream(link, g.url);
+        if (s && s.m3u8){ s.frame = link; add(s); break; }
+      } catch(e){}
+    }
+  }
+  const ranked = [];
+  for (const c of out){
+    const r = await rankCandidate(c);
+    if (r) ranked.push(r);
+  }
+  ranked.sort(function(a, b){
+    // Height first, then bandwidth. A ladder that the relay cannot actually start must
+    // not be preferred on paper: the mirror's `/main/secure/..._1080p.m3u8` ranks top of
+    // the list, but handing it to the relay produced a black picture (it will not fetch
+    // that CDN), so the *upgrade* pass below -- decoder says under 1080, then try the
+    // next link -- is what spends a link on the mirror, not the ordering.
+    return (b.h - a.h) || (b.bw - a.bw);
+  });
+  if (typeof console !== 'undefined' && console.log)
+    console.log('ranked candidates: ' + ranked.map(function(c){
+      return (c.w + 'x' + c.h + '@' + Math.round(c.bw / 1000) + 'k ' + (c.via || '')); }).join(' | '));
+  ranked.links = links;          // huntSharp needs the links it has not tried yet
+  return ranked;
+}
+
+/**
+ * Put the picture on the best measured candidate.
+ *
+ * The label is not the truth (a 1080p rung that decodes at 720p is the norm on the
+ * inline family), so once a candidate is playing the decoder is asked: if it reports
+ * under 1080 and another candidate exists, the next one gets a turn; the highest
+ * measured height wins and the loser is put back if the contender never starts.
+ */
+let qualityRun = 0;
+/** Hunt for a sharper link *after* the picture is up, where seconds are free. */
+async function huntSharp(g, ranked, attached, links){
+  if (!links || !links.length) return ranked;
+  const haveSource = {};
+  ranked.forEach(function(c){ if (c.frame) haveSource[c.frame] = 1; });
+  for (const link of links.slice(0, 3)){
+    if (haveSource[link]) continue;
+    if (attached && attached.h >= 1080 && v.videoHeight >= 1000) break;
+    try {
+      const s = await sniffStream(link, g.url);
+      if (!s || !s.m3u8) continue;
+      s.frame = link;
+      const r = await rankCandidate(s);
+      if (r) ranked.push(r);
+    } catch(e){}
+  }
+  ranked.sort(function(a, b){ return (b.h - a.h) || (b.bw - a.bw); });
+  return ranked;
+}
+
+async function upgradeQuality(g, ranked, attached, links){
+  const mine = ++qualityRun;
+  for (let i = 0; i < ranked.length && i < 4; i++){
+    if (mine !== qualityRun) return null;                    // another game took over
+    const c = ranked[i];
+    if (attached && c.m3u8 === attached.m3u8) continue;
+    if (attached && attached.h && v.videoHeight && attached.h >= 1000 && v.videoHeight >= 1000) return attached;
+    setSpin(true, 'checking the next link for a sharper picture...');
+    let ok = false;
+    try {
+      await playChannel({ name: g.name, url: c.m3u8, referer: c.referer },
+                        false, c.keys, true, !!(c.keys && typeof shaka !== 'undefined'));
+      const deadline = Date.now() + 9000;
+      while (Date.now() < deadline && mine === qualityRun){
+        if (v.videoHeight > 0 && v.readyState >= 2) break;
+        await new Promise(r => setTimeout(r, 400));
+      }
+      ok = v.videoHeight > 0;
+    } catch(e){ ok = false; }
+    if (mine !== qualityRun) return null;
+    if (ok && (!attached || (v.videoHeight > (attached.measuredH || 0)))){
+      c.measuredH = v.videoHeight;
+      setSpin(false);
+      qualityPickNote(g, c);
+      return c;
+    }
+    // it did not start, or it is not sharper: put the one that worked back
+    if (attached && attached.m3u8 && attached.m3u8 !== c.m3u8){
+      try {
+        await playChannel({ name: g.name, url: attached.m3u8, referer: attached.referer },
+                          false, attached.keys, true, !!(attached.keys && typeof shaka !== 'undefined'));
+      } catch(e){}
+    }
+  }
+  setSpin(false);
+  return attached;
+}
+function qualityPickNote(g, c){
+  try { pickCache[g.url] = c; } catch(e){}
+  const sp = $('#pillSrc');
+  if (sp && c.h){
+    sp.textContent = 'best link: ' + c.w + 'x' + c.h + (c.via ? ' \u00b7 via ' + c.via : '');
+    sp.className = 'pill good'; sp.style.display = '';
+  }
+}
+
+/**
+ * Those `/main/secure/<sha>/<epoch>/` URLs rotate: the epoch is minutes long, so a
+ * manifest that answered when the page was read starts answering 404 (and the relay
+ * just retries it until it gives up, which is how a running 1080p game "died"). Ask
+ * again from the same player page and hand the relay the fresh URL.
+ */
+let liveGuard = null;
+function startLiveGuard(g, frame, cand){
+  if (liveGuard) clearInterval(liveGuard);
+  if (!cand || !cand.m3u8) return;
+  // Two kinds of staleness. A token ladder (`/main/secure/<sha>/<epoch>/`) dies when
+  // its epoch turns over; an inline id (`/inline/<id>/...`) dies because the hub's
+  // remembered page payload stops being served after a while -- repeated resolves of
+  // the same game reuse that id and the picture comes up black. Both are renewed the
+  // same way: ask the player page again.
+  const local = cand.m3u8.indexOf('127.0.0.1') >= 0;
+  liveGuard = setInterval(async function(){
+    if (!document.body.classList.contains('playing')) return;
+    if (local && v.videoHeight > 0 && v.readyState >= 2) return;      // playing fine
+    const t = local ? '#EXTM3U' : await hubFetch(cand.m3u8, cand.referer || '').catch(function(){ return ''; });
+    if (t && t.trim().slice(0, 7).toUpperCase() === '#EXTM3U' && !local) return;
+    if (local && v.videoHeight > 0) return;
+    clearInterval(liveGuard); liveGuard = null;
+    if (!frame) return;
+    let fresh = null;
+    try { fresh = await sniffStream(frame, g.url); } catch(e){}
+    if (fresh && fresh.m3u8){
+      cand.m3u8 = fresh.m3u8; cand.referer = fresh.referer || cand.referer;
+      toast('feed token rotated - re-harvested the stream', 2600);
+      try {
+        await playChannel({ name: g.name, url: fresh.m3u8, referer: fresh.referer },
+                          false, fresh.keys, true, !!(fresh.keys && typeof shaka !== 'undefined'));
+      } catch(e){}
+      startLiveGuard(g, frame, cand);
+    } else {
+      toast('feed token rotated and could not be renewed - reload the stream', 4000);
+    }
+  }, local ? 12000 : 20000);
+}
+
+
 
 // One place that opens the player frame, and one guard on it. A framed copy of a
 // player page is still a page somebody else wrote: it can navigate itself to an
@@ -1670,9 +1913,24 @@ async function watchGame(g, useFrame){
     if (STANDALONE){
       setSpin(true, 'resolving the stream link directly...');
       $('#nowTitle').textContent = g.name;
-      let h = null;
-      try { h = await harvestChain(g, useFrame ? [useFrame] : null); }
-      catch(e){ toast('direct resolve failed (' + e.message + ') - trying the player page', 3200); }
+      // every link of the event page, ranked by the ladder it advertises -- the
+      // first link that plays is regularly the 720p one (see harvestRanked)
+      let ranked = [];
+      try { ranked = await harvestRanked(g, useFrame ? [useFrame] : null); }
+      catch(e){ toast('ranking the links failed (' + e.message + ') - using the old walk', 3000); }
+      if (!ranked.length){
+        try {
+          const one = await harvestChain(g, useFrame ? [useFrame] : null);
+          if (one && one.m3u8) ranked = [Object.assign({ frame: g.url }, one)];
+        } catch(e){}
+      }
+      // the link that measured best on this game before goes first
+      const remembered = pickCache[g.url];
+      if (remembered && remembered.m3u8){
+        const at = ranked.findIndex(c => c.m3u8 === remembered.m3u8);
+        if (at > 0){ const [x] = ranked.splice(at, 1); ranked.unshift(x); }
+      }
+      let h = ranked[0] || null;
       // The plain-GET walk stops at a chain built in JavaScript. Those pages are
       // rendered by the app's invisible engine instead -- no screen, no popups,
       // ad hosts blocked -- and only the media playlist it asks for comes back.
@@ -1686,7 +1944,7 @@ async function watchGame(g, useFrame){
         for (let i = 0; i < cand.length && i < 3; i++){
           setSpin(true, 'reading the player page for its stream...');
           const s = await sniffStream(cand[i], cand[i] === g.url ? '' : g.url);
-          if (s && s.m3u8){ h = s; toast('stream found - playing it in the app, no page', 3000); break; }
+          if (s && s.m3u8){ s.frame = cand[i]; h = s; ranked = [s]; toast('stream found - playing it in the app, no page', 3000); break; }
         }
       }
       if (h && h.m3u8){
@@ -1709,6 +1967,23 @@ async function watchGame(g, useFrame){
             await playChannel({ name: g.name, url: h.m3u8, referer: h.referer },
                               false, h.keys, true,
                               !!(h.keys && typeof shaka !== 'undefined'));
+            // the decoder is the final judge: a "1080p" rung that decodes at 720p
+            // must lose to a link that really is 1080p. The hunt runs now, not before
+            // playback: the picture is already on screen, so a sniff costs nothing.
+            let playing = Object.assign({}, h, { measuredH: v.videoHeight || 0 });
+            if (!v.videoHeight || v.videoHeight < 1080){
+              // The hunt is behind this switch because it is not honest yet: the mirror's
+              // `/main/secure/..._1080p.m3u8` ranks top (real 1920x1080, clear HLS, verified
+              // with a decoder) but handing it to the relay starts nothing -- the relay's
+              // own fetch of that CDN is the missing piece, and an auto-switch to a stream
+              // the relay cannot pull leaves a black picture. Turn it on when the relay can.
+              if (SHARP_HUNT){ try {
+                ranked = await huntSharp(g, ranked, playing, ranked.links || null);
+                playing = (await upgradeQuality(g, ranked, playing, ranked.links || null)) || playing;
+              } catch(e){} }
+            }
+            startLiveGuard(g, (playing && playing.frame) || h.frame || null, playing || h);
+            setSpin(false);
             return;
           } catch(e){
             toast('that feed would not start - falling back to the player page', 3600);
